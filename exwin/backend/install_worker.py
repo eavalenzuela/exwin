@@ -170,3 +170,41 @@ def install_gog(
 
     _log(f'✓ "{info.title}" installed successfully.')
     return app
+
+
+def install_gog_dlc(
+    installer_path: Path,
+    base_app: AppEntry,
+    config: Config,
+    runtime: Runtime | None,
+    on_progress: Callable[[str], None] | None = None,
+) -> str:
+    """Extract a GOG DLC installer into an existing game's install directory.
+
+    Steps:
+        1. Probe installer (innoextract --info) for display name
+        2. Extract directly into base_app.install_path (merge, not overwrite)
+        3. No prefix creation, no DB insert
+
+    Returns the DLC title string.
+    """
+
+    def _log(msg: str) -> None:
+        if on_progress:
+            on_progress(msg)
+
+    # ── 1. Probe ─────────────────────────────────────────────────────────
+    _log(f"Reading DLC installer: {installer_path.name}")
+    info = probe(installer_path)
+    _log(f'DLC: "{info.title}"')
+
+    # ── 2. Extract into base game directory ───────────────────────────────
+    install_dir = Path(base_app.install_path)
+    _log(f"Extracting DLC into {install_dir} …")
+    try:
+        extract(installer_path, install_dir, on_progress=_log)
+    except Exception as exc:
+        raise RuntimeError(f"DLC extraction failed: {exc}") from exc
+
+    _log(f'✓ DLC "{info.title}" installed for "{base_app.name}".')
+    return info.title

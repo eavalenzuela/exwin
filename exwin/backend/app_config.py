@@ -39,6 +39,9 @@ class AppConfig:
     dxvk: bool = False
     vkd3d: bool = False
 
+    # GPU override: DRI_PRIME index; None = system default
+    gpu_index: int | None = None
+
 
 def load_app_config(app_id: str, config: Config) -> AppConfig:
     """Load per-app config from TOML, returning defaults if the file doesn't exist."""
@@ -61,6 +64,7 @@ def load_app_config(app_id: str, config: Config) -> AppConfig:
         dll_overrides=raw.get("dll_overrides", {}),
         dxvk=wine.get("dxvk", False),
         vkd3d=wine.get("vkd3d", False),
+        gpu_index=launch.get("gpu_index"),
     )
 
 
@@ -81,6 +85,7 @@ def save_app_config(app_id: str, config: Config, app_config: AppConfig) -> None:
             "args": app_config.launch_args,
             "gamemode": app_config.gamemode,
             "mangohud": app_config.mangohud,
+            **({"gpu_index": app_config.gpu_index} if app_config.gpu_index is not None else {}),
         },
         "dll_overrides": app_config.dll_overrides,
     }

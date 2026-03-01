@@ -20,10 +20,11 @@ from exwin.backend.generic_installer import (  # noqa: E402
     run_wine_installer,
     scan_candidate_exes,
 )
-from exwin.backend.gog_installer import find_innoextract, probe  # noqa: E402
-from exwin.backend.install_worker import install_gog  # noqa: E402
+from exwin.backend.gog_installer import find_innoextract, find_sibling_parts, probe  # noqa: E402
+from exwin.backend.install_worker import install_gog, install_gog_dlc  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.backend.winetricks import is_available as winetricks_available  # noqa: E402
+from exwin.db.apps import get_all_apps  # noqa: E402
 from exwin.models import AppEntry  # noqa: E402
 
 _ARCH_OPTIONS = ["win64", "win32"]
@@ -44,9 +45,18 @@ class InstallDialog(Adw.Dialog):
         self._runtimes = runtimes
         self._on_installed = on_installed
         self._installer_path: Path | None = None
+        self._installer_parts: list[Path] = []
         self._installer_type: str = "innosetup"  # "innosetup" | "generic"
         self._wine_proc = None  # running Wine installer subprocess
         self._generic_prefix_root: Path | None = None
+        self._generic_dlc_mode: bool = False
+        self._generic_dlc_base_app: AppEntry | None = None
+
+        # Load existing library entries for DLC base-game picker
+        try:
+            self._base_games: list[AppEntry] = get_all_apps()
+        except Exception:
+            self._base_games = []
 
         toolbar_view = Adw.ToolbarView()
         self.set_child(toolbar_view)
@@ -121,9 +131,11 @@ class InstallDialog(Adw.Dialog):
         self._title_row = Adw.ActionRow(title="Title")
         self._gameid_row = Adw.ActionRow(title="GOG ID")
         self._lang_row = Adw.ActionRow(title="Languages")
+        self._parts_row = Adw.ActionRow(title="Installer Parts")
         self._game_info_group.add(self._title_row)
         self._game_info_group.add(self._gameid_row)
         self._game_info_group.add(self._lang_row)
+        self._game_info_group.add(self._parts_row)
         box.append(self._game_info_group)
 
         options_group = Adw.PreferencesGroup(title="Install Options")
@@ -146,6 +158,23 @@ class InstallDialog(Adw.Dialog):
             self._winetricks_row.set_sensitive(False)
             self._winetricks_row.set_title("Winetricks Verbs (winetricks not installed)")
         options_group.add(self._winetricks_row)
+
+        self._dlc_switch_row = Adw.SwitchRow(
+            title="DLC / Add-on",
+            subtitle="Install into an existing game's directory",
+        )
+        if not self._base_games:
+            self._dlc_switch_row.set_sensitive(False)
+            self._dlc_switch_row.set_subtitle("No games installed yet")
+        self._dlc_switch_row.connect("notify::active", self._on_dlc_toggled)
+        options_group.add(self._dlc_switch_row)
+
+        base_names = [app.name for app in self._base_games] or ["—"]
+        self._base_game_row = Adw.ComboRow(title="Base Game")
+        self._base_game_row.set_model(Gtk.StringList.new(base_names))
+        self._base_game_row.set_selected(0)
+        self._base_game_row.set_visible(False)
+        options_group.add(self._base_game_row)
 
         self._dxvk_row = Adw.SwitchRow(title="Install DXVK", subtitle="DirectX 9/10/11 → Vulkan")
         options_group.add(self._dxvk_row)
@@ -217,6 +246,23 @@ class InstallDialog(Adw.Dialog):
             self._generic_winetricks_row.set_sensitive(False)
             self._generic_winetricks_row.set_title("Winetricks Verbs (winetricks not installed)")
         options_group.add(self._generic_winetricks_row)
+
+        self._generic_dlc_switch_row = Adw.SwitchRow(
+            title="DLC / Add-on",
+            subtitle="Install into an existing game's directory",
+        )
+        if not self._base_games:
+            self._generic_dlc_switch_row.set_sensitive(False)
+            self._generic_dlc_switch_row.set_subtitle("No games installed yet")
+        self._generic_dlc_switch_row.connect("notify::active", self._on_generic_dlc_toggled)
+        options_group.add(self._generic_dlc_switch_row)
+
+        generic_base_names = [app.name for app in self._base_games] or ["—"]
+        self._generic_base_game_row = Adw.ComboRow(title="Base Game")
+        self._generic_base_game_row.set_model(Gtk.StringList.new(generic_base_names))
+        self._generic_base_game_row.set_selected(0)
+        self._generic_base_game_row.set_visible(False)
+        options_group.add(self._generic_base_game_row)
 
         self._generic_dxvk_row = Adw.SwitchRow(
             title="Install DXVK", subtitle="DirectX 9/10/11 → Vulkan"
@@ -385,6 +431,7 @@ class InstallDialog(Adw.Dialog):
             return
 
         self._installer_path = Path(gfile.get_path())
+        self._installer_parts = find_sibling_parts(self._installer_path)
         self._show_probing()
 
     def _show_probing(self) -> None:
@@ -420,6 +467,12 @@ class InstallDialog(Adw.Dialog):
         self._gameid_row.set_subtitle(info.game_id or "N/A")
         self._lang_row.set_subtitle(", ".join(info.languages) or "N/A")
 
+        n = len(self._installer_parts)
+        if n == 0:
+            self._parts_row.set_subtitle("Single-file installer")
+        else:
+            self._parts_row.set_subtitle(f"Multi-part: {1 + n} files ({n} .bin parts detected)")
+
     def _on_generic_detected(self) -> None:
         self._installer_type = "generic"
         assert self._installer_path is not None
@@ -451,17 +504,28 @@ class InstallDialog(Adw.Dialog):
         verbs = verbs_text.split() if verbs_text else []
 
         try:
-            app = install_gog(
-                installer_path=self._installer_path,
-                config=self._config,
-                runtime=runtime,
-                arch=arch,
-                winetricks_verbs=verbs,
-                dxvk=self._dxvk_row.get_active(),
-                vkd3d=self._vkd3d_row.get_active(),
-                on_progress=lambda msg: GLib.idle_add(self._append_log, msg),
-            )
-            GLib.idle_add(self._on_install_done, app)
+            if self._dlc_switch_row.get_active() and self._base_games:
+                base_app = self._base_games[self._base_game_row.get_selected()]
+                dlc_title = install_gog_dlc(
+                    installer_path=self._installer_path,
+                    base_app=base_app,
+                    config=self._config,
+                    runtime=runtime,
+                    on_progress=lambda msg: GLib.idle_add(self._append_log, msg),
+                )
+                GLib.idle_add(self._on_dlc_install_done, dlc_title, base_app.name)
+            else:
+                app = install_gog(
+                    installer_path=self._installer_path,
+                    config=self._config,
+                    runtime=runtime,
+                    arch=arch,
+                    winetricks_verbs=verbs,
+                    dxvk=self._dxvk_row.get_active(),
+                    vkd3d=self._vkd3d_row.get_active(),
+                    on_progress=lambda msg: GLib.idle_add(self._append_log, msg),
+                )
+                GLib.idle_add(self._on_install_done, app)
         except Exception as exc:
             GLib.idle_add(self._on_error, str(exc))
 
@@ -476,18 +540,28 @@ class InstallDialog(Adw.Dialog):
         )
         arch = _ARCH_OPTIONS[self._generic_arch_row.get_selected()]
 
-        from exwin.backend.prefix import prefix_root
+        if self._generic_dlc_switch_row.get_active() and self._base_games:
+            base_app = self._base_games[self._generic_base_game_row.get_selected()]
+            self._generic_dlc_mode = True
+            self._generic_dlc_base_app = base_app
+            p_root = Path(base_app.prefix_path)
+        else:
+            from exwin.backend.prefix import prefix_root
 
-        app_name = self._installer_path.stem
-        app_id_slug = app_name.lower().replace(" ", "-")
-        self._generic_prefix_root = prefix_root(f"manual-{app_id_slug}", self._config)
+            self._generic_dlc_mode = False
+            self._generic_dlc_base_app = None
+            app_name = self._installer_path.stem
+            app_id_slug = app_name.lower().replace(" ", "-")
+            p_root = prefix_root(f"manual-{app_id_slug}", self._config)
+
+        self._generic_prefix_root = p_root
         self._generic_runtime = runtime
         self._generic_arch = arch
 
         self._stack.set_visible_child_name("wine_running")
         threading.Thread(
             target=self._wine_installer_thread,
-            args=(self._installer_path, self._generic_prefix_root, runtime, arch),
+            args=(self._installer_path, p_root, runtime, arch),
             daemon=True,
         ).start()
 
@@ -502,6 +576,13 @@ class InstallDialog(Adw.Dialog):
             GLib.idle_add(self._on_error, str(exc))
 
     def _on_wine_installer_done(self) -> None:
+        if self._generic_dlc_mode and self._generic_dlc_base_app is not None:
+            self._done_page.set_description(
+                f'DLC installed for "{self._generic_dlc_base_app.name}".'
+            )
+            self._stack.set_visible_child_name("done")
+            return
+
         assert self._generic_prefix_root is not None
         candidates = scan_candidate_exes(self._generic_prefix_root, self._generic_runtime)
 
@@ -590,11 +671,22 @@ class InstallDialog(Adw.Dialog):
     # Shared handlers
     # ------------------------------------------------------------------
 
+    def _on_dlc_toggled(self, switch_row: Adw.SwitchRow, _pspec) -> None:
+        self._base_game_row.set_visible(switch_row.get_active())
+
+    def _on_generic_dlc_toggled(self, switch_row: Adw.SwitchRow, _pspec) -> None:
+        self._generic_base_game_row.set_visible(switch_row.get_active())
+
     def _on_install_done(self, app: AppEntry) -> None:
         self._install_spinner.set_spinning(False)
         self._done_page.set_description(f'"{app.name}" is ready to play.')
         self._stack.set_visible_child_name("done")
         self._on_installed(app)
+
+    def _on_dlc_install_done(self, dlc_title: str, base_name: str) -> None:
+        self._install_spinner.set_spinning(False)
+        self._done_page.set_description(f'DLC installed for "{base_name}".')
+        self._stack.set_visible_child_name("done")
 
     def _on_error(self, message: str) -> None:
         self._install_spinner.set_spinning(False)

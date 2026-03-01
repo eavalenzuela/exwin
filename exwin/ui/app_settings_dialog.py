@@ -58,6 +58,7 @@ class AppSettingsDialog(Adw.Dialog):
         self._build_executable_group(prefs, app, app_config)
         self._build_wine_group(prefs, app_config)
         self._build_launch_group(prefs, app_config)
+        self._build_gpu_group(prefs, app_config)
         self._build_env_group(prefs, app_config)
         self._build_dll_group(prefs, app_config)
         self._build_action_row(toolbar_view)
@@ -140,6 +141,34 @@ class AppSettingsDialog(Adw.Dialog):
         self._args_row.set_text(" ".join(cfg.launch_args))
         self._args_row.set_tooltip_text("Space-separated arguments passed to the executable")
         group.add(self._args_row)
+
+    def _build_gpu_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
+        group = Adw.PreferencesGroup(title="GPU")
+        prefs.add(group)
+
+        from exwin.backend.gpu import detect_gpus
+
+        self._gpus = detect_gpus()
+
+        if not self._gpus:
+            info_row = Adw.ActionRow(
+                title="No discrete GPUs detected",
+                subtitle="GPU override is not available on this system",
+            )
+            group.add(info_row)
+            self._gpu_row = None
+            return
+
+        options = ["System Default"] + [f"GPU {g.index} — {g.name}" for g in self._gpus]
+        self._gpu_row = Adw.ComboRow(title="GPU Override")
+        self._gpu_row.set_model(Gtk.StringList.new(options))
+
+        if cfg.gpu_index is not None and cfg.gpu_index < len(self._gpus):
+            self._gpu_row.set_selected(cfg.gpu_index + 1)  # +1 for "System Default"
+        else:
+            self._gpu_row.set_selected(0)
+
+        group.add(self._gpu_row)
 
     def _build_env_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
         group = Adw.PreferencesGroup(
@@ -313,6 +342,11 @@ class AppSettingsDialog(Adw.Dialog):
         env = _parse_kv_text(self._env_view.get_buffer())
         dll_overrides = _parse_kv_text(self._dll_view.get_buffer())
 
+        gpu_index = None
+        if self._gpu_row is not None:
+            gpu_sel = self._gpu_row.get_selected()
+            gpu_index = None if gpu_sel == 0 else (gpu_sel - 1)
+
         return AppConfig(
             arch=_ARCH_OPTIONS[self._arch_row.get_selected()],
             winetricks_verbs=verbs,
@@ -323,6 +357,7 @@ class AppSettingsDialog(Adw.Dialog):
             gamemode=self._gamemode_row.get_active(),
             mangohud=self._mangohud_row.get_active(),
             dll_overrides=dll_overrides,
+            gpu_index=gpu_index,
         )
 
 

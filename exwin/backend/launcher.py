@@ -13,8 +13,12 @@ from gi.repository import GLib
 
 from exwin.backend.app_config import AppConfig
 from exwin.backend.config import Config
+from exwin.backend.gpu import detect_gpus
 from exwin.backend.runtime import Runtime
 from exwin.models import AppEntry
+
+# Cached GPU list — scanned once on first launch that needs GPU selection.
+_GPUS: list | None = None
 
 # Steam expects this to point to the Steam root for overlay / VR support.
 # We set it to the canonical ~/.steam/root symlink; if absent, leave empty.
@@ -136,6 +140,15 @@ class Launcher:
             overrides = ";".join(f"{dll}={mode}" for dll, mode in app_config.dll_overrides.items())
             existing = env.get("WINEDLLOVERRIDES", "")
             env["WINEDLLOVERRIDES"] = f"{existing};{overrides}" if existing else overrides
+
+        # GPU selection via DRI_PRIME
+        if app_config.gpu_index is not None:
+            global _GPUS
+            if _GPUS is None:
+                _GPUS = detect_gpus()
+            env["DRI_PRIME"] = str(app_config.gpu_index)
+            if app_config.gpu_index < len(_GPUS):
+                env.setdefault("DXVK_FILTER_DEVICE_NAME", _GPUS[app_config.gpu_index].name)
 
         # User-supplied extra env vars (applied last so they can override defaults)
         env.update(app_config.env)

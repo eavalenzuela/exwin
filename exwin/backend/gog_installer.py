@@ -159,6 +159,18 @@ def find_cover_art(install_dir: Path) -> Path | None:
     return others[0] if others else None
 
 
+def find_sibling_parts(exe_path: Path) -> list[Path]:
+    """Return .bin part files that belong to a multi-part GOG installer.
+
+    Looks for files in the same directory matching the pattern:
+      <stem>*.bin  (e.g. setup_balrum-1.bin, setup_balrum-2.bin)
+    Returns them sorted; empty list for single-part installers.
+    """
+    stem = exe_path.stem
+    parent = exe_path.parent
+    return sorted(parent.glob(f"{stem}*.bin"))
+
+
 def app_id_from_info(info: InstallerInfo) -> str:
     """Derive a stable, filesystem-safe app ID for a GOG game."""
     if info.game_id:
