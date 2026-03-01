@@ -61,6 +61,9 @@ class TestImports:
     def test_import_prefix(self) -> None:
         import exwin.backend.prefix  # noqa: F401
 
+    def test_import_desktop_shortcut(self) -> None:
+        import exwin.backend.desktop_shortcut  # noqa: F401
+
 
 # ---------------------------------------------------------------------------
 # App launch smoke test (requires display — skipped if $DISPLAY is unset)
@@ -131,3 +134,36 @@ def test_default_data_dir_is_dot_exwin() -> None:
     from exwin.backend.config import _DEFAULT_DATA_DIR
 
     assert _DEFAULT_DATA_DIR == Path.home() / ".exwin"
+
+
+# ---------------------------------------------------------------------------
+# --launch headless mode tests (no display required)
+# ---------------------------------------------------------------------------
+
+
+def test_launch_flag_unknown_app_exits_nonzero(tmp_path: Path) -> None:
+    """--launch <nonexistent-id> must exit with a non-zero status and print an error."""
+    env = os.environ.copy()
+    env["EXWIN_DATA_DIR"] = str(tmp_path / "exwin")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "exwin", "--launch", "nonexistent-app-id"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode != 0
+    assert "nonexistent-app-id" in result.stderr or "nonexistent-app-id" in result.stdout
+
+
+def test_launch_flag_help(tmp_path: Path) -> None:
+    """exwin --help must mention --launch."""
+    result = subprocess.run(
+        [sys.executable, "-m", "exwin", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "--launch" in result.stdout

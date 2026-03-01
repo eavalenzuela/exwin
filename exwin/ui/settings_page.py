@@ -52,6 +52,29 @@ class SettingsPage(Adw.PreferencesPage):
         dir_row.add_suffix(open_btn)
         general.add(dir_row)
 
+        # Prefix storage directory
+        prefix_row = Adw.EntryRow(title="Prefix Storage Directory")
+        prefix_row.set_text(str(config.prefix_root) if config.prefix_root else "")
+        prefix_row.set_tooltip_text(
+            "Root folder for all new Wine prefixes. "
+            "Leave blank to use the default (data_dir/prefixes/). "
+            "Existing installs are unaffected."
+        )
+        browse_btn = Gtk.Button(icon_name="folder-open-symbolic")
+        browse_btn.add_css_class("flat")
+        browse_btn.set_valign(Gtk.Align.CENTER)
+        browse_btn.connect("clicked", self._on_browse_prefix_root)
+        prefix_row.add_suffix(browse_btn)
+        clear_btn = Gtk.Button(icon_name="edit-clear-symbolic")
+        clear_btn.add_css_class("flat")
+        clear_btn.set_valign(Gtk.Align.CENTER)
+        clear_btn.set_tooltip_text("Reset to default")
+        clear_btn.connect("clicked", self._on_clear_prefix_root, prefix_row)
+        prefix_row.add_suffix(clear_btn)
+        prefix_row.connect("notify::text", self._on_prefix_root_changed)
+        general.add(prefix_row)
+        self._prefix_row = prefix_row
+
         # Color scheme
         scheme_row = Adw.ComboRow(title="Color Scheme")
         scheme_row.set_model(Gtk.StringList.new([label for label, _, _ in _COLOR_SCHEMES]))
@@ -109,6 +132,27 @@ class SettingsPage(Adw.PreferencesPage):
 
     def _on_open_data_dir(self, _btn: Gtk.Button) -> None:
         subprocess.Popen(["xdg-open", str(self._config.data_dir)])
+
+    def _on_prefix_root_changed(self, row: Adw.EntryRow, _param) -> None:
+        v = row.get_text().strip()
+        self._config.prefix_root = Path(v) if v else None
+        self._config.save()
+
+    def _on_browse_prefix_root(self, _btn: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Select Prefix Storage Directory")
+        dialog.select_folder(self.get_root(), None, self._on_browse_prefix_root_done)
+
+    def _on_browse_prefix_root_done(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            folder = dialog.select_folder_finish(result)
+        except Exception:
+            return
+        if folder:
+            self._prefix_row.set_text(folder.get_path())
+
+    def _on_clear_prefix_root(self, _btn: Gtk.Button, row: Adw.EntryRow) -> None:
+        row.set_text("")
 
     def _on_color_scheme_changed(self, row: Adw.ComboRow, _param) -> None:
         _, scheme, key = _COLOR_SCHEMES[row.get_selected()]

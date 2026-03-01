@@ -137,6 +137,12 @@ class AppDetailDialog(Adw.Dialog):
         open_btn.connect("clicked", self._on_open_prefix)
         btn_box.append(open_btn)
 
+        shortcut_btn = Gtk.Button(label="Shortcut")
+        shortcut_btn.add_css_class("flat")
+        shortcut_btn.set_tooltip_text("Create a desktop shortcut for this app")
+        shortcut_btn.connect("clicked", self._on_make_shortcut)
+        btn_box.append(shortcut_btn)
+
         if is_running:
             primary_btn = Gtk.Button(label="Stop")
             primary_btn.add_css_class("destructive-action")
@@ -192,6 +198,18 @@ class AppDetailDialog(Adw.Dialog):
     def _on_open_prefix(self, _btn: Gtk.Button) -> None:
         if self._app.prefix_path:
             subprocess.Popen(["xdg-open", self._app.prefix_path])
+
+    def _on_make_shortcut(self, _btn: Gtk.Button) -> None:
+        from exwin.backend.desktop_shortcut import create_shortcut
+
+        try:
+            dest = create_shortcut(self._app)
+            msg = f"Shortcut created: {dest.name}"
+        except Exception as exc:
+            msg = f"Shortcut failed: {exc}"
+        root = self.get_root()
+        if hasattr(root, "show_toast"):
+            root.show_toast(msg)
 
 
 # ---------------------------------------------------------------------------
