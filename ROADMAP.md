@@ -57,32 +57,40 @@ Goal: A working window that can display a list of apps and supports basic action
 Goal: Reliable, isolated, per-app Wine environments with configurable Proton/Wine versions.
 
 ### 2.1 Runtime Management
-- [ ] Detect installed Proton versions (from Steam compatibilitytools.d, GE-Proton, system Wine)
-- [ ] Support downloading/updating Proton-GE versions
-- [ ] Select per-app runtime (Proton version or system Wine)
+- [x] Detect installed Proton versions (scans `~/.steam/root/steamapps/common/`, `compatibilitytools.d/`)
+- [x] Detect system Wine via `which wine`
+- [x] Persist detected runtimes to DB (`sync_runtimes` upserts on every startup)
+- [x] Runtimes listed in Settings page; first detected runtime used as default
+- [ ] Support downloading/updating Proton-GE versions (M4)
 
 ### 2.2 Prefix Management
-- [ ] Create isolated Wine prefixes per application (stored under a configurable root, e.g. `~/.local/share/exwin/prefixes/<app-id>/`)
-- [ ] Initialize prefixes (WINEPREFIX setup, arch selection: win32/win64)
-- [ ] Delete prefix on uninstall
+- [x] Create isolated prefix root per app (`~/.local/share/exwin/prefixes/<app-id>/`)
+- [x] Initialize Wine prefix via `wineboot --init` (Wine); Proton self-initialises on first run
+- [x] `wineprefix_path()` returns correct path for runtime type (Proton: `pfx/` subdir; Wine: root)
+- [x] Delete prefix on uninstall (`delete_prefix` + `shutil.rmtree`)
 
 ### 2.3 Winetricks Integration
-- [ ] Run winetricks verbs against a specific prefix
-- [ ] Per-app winetricks dependency list (stored in app config, applied automatically at install time)
-- [ ] Common verb presets (vcredist, dotnet, dxvk, vkd3d, etc.)
+- [x] `run_verbs(prefix_root, verbs, runtime)` spawns winetricks with correct WINEPREFIX
+- [x] Proton bundled wine binaries used when available (WINE/WINESERVER env vars)
+- [x] Per-app verb list stored in `app.toml` under `[wine] winetricks_verbs`
+- [ ] GUI for managing winetricks deps per app (M4 polish)
 
 ### 2.4 Per-App Configuration
-- [ ] Environment variable overrides (DXVK, VKD3D-Proton flags, WINE_*, etc.)
-- [ ] Launch arguments / pre-launch scripts
-- [ ] DXVK / VKD3D-Proton version selection and auto-install into prefix
-- [ ] Wine DLL overrides
-- [ ] Gamemode / Mangohud toggles
+- [x] `AppConfig` dataclass + TOML round-trip (`apps/<app-id>/app.toml`)
+- [x] Environment variable overrides (`[env]` section)
+- [x] Launch arguments, Gamemode, Mangohud toggles (`[launch]` section)
+- [x] Wine DLL overrides (`[dll_overrides]` → `WINEDLLOVERRIDES`)
+- [x] Wine arch selection (`win32` / `win64`)
+- [ ] DXVK / VKD3D-Proton auto-install into prefix (M4)
 
 ### 2.5 Launch Pipeline
-- [ ] Resolve runtime → build environment → exec target executable
-- [ ] Capture stdout/stderr to a per-app log file
-- [ ] Track running state (PID watching, "running" badge in GUI)
-- [ ] Kill / force-stop running app
+- [x] `Launcher.launch()` — resolves runtime → builds env/command → spawns process
+- [x] `STEAM_COMPAT_DATA_PATH` + `STEAM_COMPAT_CLIENT_INSTALL_PATH` set for Proton
+- [x] stdout/stderr captured to `logs/<app-id>.log`
+- [x] Running state tracked in `Launcher._running` dict; `running_ids()` exposed
+- [x] Running badge (▶) shown on library cards; detail dialog shows Stop button
+- [x] `Launcher.stop()` sends SIGTERM; daemon thread calls `GLib.idle_add` on exit
+- [x] `last_launched` timestamp updated in DB on process exit
 
 ---
 

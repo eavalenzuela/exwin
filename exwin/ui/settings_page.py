@@ -12,6 +12,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gtk  # noqa: E402
 
 from exwin.backend.config import Config  # noqa: E402
+from exwin.backend.runtime import Runtime  # noqa: E402
 
 _COLOR_SCHEMES = [
     ("System", Adw.ColorScheme.DEFAULT),
@@ -23,7 +24,7 @@ _COLOR_SCHEMES = [
 class SettingsPage(Adw.PreferencesPage):
     """Global preferences panel."""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, runtimes: list[Runtime]) -> None:
         super().__init__()
         self._config = config
 
@@ -52,17 +53,35 @@ class SettingsPage(Adw.PreferencesPage):
         general.add(scheme_row)
 
         # ── Wine / Proton group ──────────────────────────────────────────
-        wine_group = Adw.PreferencesGroup(
-            title="Wine / Proton",
-            description="Runtime configuration — managed automatically in M2.",
-        )
+        wine_group = Adw.PreferencesGroup(title="Wine / Proton")
         self.add(wine_group)
 
-        runtime_row = Adw.ActionRow(
-            title="Default Runtime",
-            subtitle=config.default_runtime or "Auto-detect (not yet configured)",
+        if not runtimes:
+            wine_group.set_description(
+                "No runtimes detected. Install Proton via Steam or Wine via your package manager."
+            )
+            wine_group.add(
+                Adw.ActionRow(
+                    title="No runtimes found",
+                    subtitle="Steam Proton and/or system Wine will appear here once available.",
+                )
+            )
+            return
+
+        wine_group.set_description(
+            f"{len(runtimes)} runtime(s) detected. "
+            "The first entry is used by default when no per-app runtime is set."
         )
-        wine_group.add(runtime_row)
+
+        for rt in runtimes:
+            row = Adw.ActionRow(title=rt.name, subtitle=rt.version or rt.type.capitalize())
+            icon = (
+                "media-playback-start-symbolic"
+                if rt.is_proton
+                else "application-x-executable-symbolic"
+            )
+            row.add_prefix(Gtk.Image(icon_name=icon, pixel_size=16))
+            wine_group.add(row)
 
     # ------------------------------------------------------------------
     # Handlers

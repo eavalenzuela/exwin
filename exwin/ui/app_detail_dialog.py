@@ -22,13 +22,16 @@ class AppDetailDialog(Adw.Dialog):
     def __init__(
         self,
         app: AppEntry,
+        is_running: bool,
         on_launch: Callable[[AppEntry], None],
+        on_stop: Callable[[AppEntry], None],
         on_uninstall: Callable[[AppEntry], None],
         **kwargs,
     ) -> None:
         super().__init__(title=app.name, content_width=440, **kwargs)
         self._app = app
         self._on_launch = on_launch
+        self._on_stop = on_stop
         self._on_uninstall = on_uninstall
 
         toolbar_view = Adw.ToolbarView()
@@ -66,12 +69,24 @@ class AppDetailDialog(Adw.Dialog):
         name_label.set_halign(Gtk.Align.CENTER)
         content.append(name_label)
 
-        # Source badge
+        # Status / source row
+        status_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=6,
+            halign=Gtk.Align.CENTER,
+        )
+        content.append(status_box)
+
         source_label = Gtk.Label(label=app.source.upper())
         source_label.add_css_class("caption")
         source_label.add_css_class("dim-label")
-        source_label.set_halign(Gtk.Align.CENTER)
-        content.append(source_label)
+        status_box.append(source_label)
+
+        if is_running:
+            running_label = Gtk.Label(label="· Running")
+            running_label.add_css_class("caption")
+            running_label.add_css_class("success")
+            status_box.append(running_label)
 
         # Description
         if app.description:
@@ -106,17 +121,24 @@ class AppDetailDialog(Adw.Dialog):
         open_btn.connect("clicked", self._on_open_prefix)
         btn_box.append(open_btn)
 
-        launch_btn = Gtk.Button(label="Launch")
-        launch_btn.add_css_class("suggested-action")
-        launch_btn.add_css_class("pill")
-        launch_btn.connect("clicked", self._on_launch_clicked)
-        btn_box.append(launch_btn)
+        if is_running:
+            primary_btn = Gtk.Button(label="Stop")
+            primary_btn.add_css_class("destructive-action")
+            primary_btn.add_css_class("pill")
+            primary_btn.connect("clicked", self._on_stop_clicked)
+        else:
+            primary_btn = Gtk.Button(label="Launch")
+            primary_btn.add_css_class("suggested-action")
+            primary_btn.add_css_class("pill")
+            primary_btn.connect("clicked", self._on_launch_clicked)
+        btn_box.append(primary_btn)
 
         uninstall_btn = Gtk.Button(label="Uninstall")
         uninstall_btn.add_css_class("destructive-action")
+        uninstall_btn.set_sensitive(not is_running)
+        uninstall_btn.set_halign(Gtk.Align.CENTER)
         uninstall_btn.connect("clicked", self._on_uninstall_clicked)
         content.append(uninstall_btn)
-        uninstall_btn.set_halign(Gtk.Align.CENTER)
 
     # ------------------------------------------------------------------
     # Button handlers
@@ -124,6 +146,10 @@ class AppDetailDialog(Adw.Dialog):
 
     def _on_launch_clicked(self, _btn: Gtk.Button) -> None:
         self._on_launch(self._app)
+        self.close()
+
+    def _on_stop_clicked(self, _btn: Gtk.Button) -> None:
+        self._on_stop(self._app)
         self.close()
 
     def _on_uninstall_clicked(self, _btn: Gtk.Button) -> None:

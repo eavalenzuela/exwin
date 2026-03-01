@@ -73,14 +73,13 @@ class LibraryPage(Gtk.Box):
     # Public API
     # ------------------------------------------------------------------
 
-    def populate(self, apps: list[AppEntry]) -> None:
+    def populate(self, apps: list[AppEntry], running_ids: frozenset[str] = frozenset()) -> None:
         """Replace the current card set with the given app list."""
-        # Remove all existing children
         while (child := self._flow_box.get_first_child()) is not None:
             self._flow_box.remove(child)
 
         for app in apps:
-            self._flow_box.append(_AppCard(app))
+            self._flow_box.append(_AppCard(app, is_running=app.app_id in running_ids))
 
         self._stack.set_visible_child_name("grid" if apps else "empty")
 
@@ -117,7 +116,7 @@ class LibraryPage(Gtk.Box):
 class _AppCard(Gtk.Box):
     """A single app card displayed in the library grid."""
 
-    def __init__(self, app: AppEntry) -> None:
+    def __init__(self, app: AppEntry, *, is_running: bool = False) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.app = app
         self.set_size_request(_CARD_WIDTH, -1)
@@ -152,8 +151,20 @@ class _AppCard(Gtk.Box):
         name_label.set_max_width_chars(20)
         label_box.append(name_label)
 
+        # Bottom row: source badge + optional running indicator
+        bottom_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        label_box.append(bottom_row)
+
         source_label = Gtk.Label(label=app.source.upper())
         source_label.add_css_class("caption")
         source_label.add_css_class("dim-label")
         source_label.set_halign(Gtk.Align.START)
-        label_box.append(source_label)
+        source_label.set_hexpand(True)
+        bottom_row.append(source_label)
+
+        if is_running:
+            running_dot = Gtk.Label(label="▶")
+            running_dot.add_css_class("caption")
+            running_dot.add_css_class("success")
+            running_dot.set_tooltip_text("Running")
+            bottom_row.append(running_dot)
