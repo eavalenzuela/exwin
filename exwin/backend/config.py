@@ -5,6 +5,7 @@ Default data directory: ~/.exwin/
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,12 @@ import tomli_w
 
 _DEFAULT_DATA_DIR = Path.home() / ".exwin"
 _CONFIG_FILENAME = "config.toml"
+
+
+def _effective_data_dir() -> Path:
+    """Return the data dir, allowing EXWIN_DATA_DIR env override."""
+    override = os.environ.get("EXWIN_DATA_DIR")
+    return Path(override) if override else _DEFAULT_DATA_DIR
 
 
 @dataclass
@@ -59,10 +66,16 @@ class Config:
 
     @classmethod
     def load(cls) -> Config:
-        """Load config from disk, or return defaults if not yet created."""
-        config_path = _DEFAULT_DATA_DIR / _CONFIG_FILENAME
+        """Load config from disk, or return defaults if not yet created.
+
+        The data directory can be overridden via the EXWIN_DATA_DIR environment
+        variable, which takes precedence over both the TOML value and the
+        compiled-in default.
+        """
+        base_dir = _effective_data_dir()
+        config_path = base_dir / _CONFIG_FILENAME
         if not config_path.exists():
-            cfg = cls()
+            cfg = cls(data_dir=base_dir)
             cfg._ensure_dirs()
             cfg.save()
             return cfg
@@ -71,7 +84,7 @@ class Config:
             raw = tomllib.load(f)
 
         cfg = cls(
-            data_dir=Path(raw.get("data_dir", _DEFAULT_DATA_DIR)),
+            data_dir=base_dir,  # env var always wins; TOML value is informational only
             default_runtime=raw.get("default_runtime", ""),
             color_scheme=raw.get("color_scheme", "system"),
         )
