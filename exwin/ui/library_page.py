@@ -123,15 +123,16 @@ class _AppCard(Gtk.Box):
         self.add_css_class("card")
 
         # Cover art
-        self._cover = Gtk.Image()
-        self._cover.set_size_request(_CARD_WIDTH, 220)
-        self._cover.set_overflow(Gtk.Overflow.HIDDEN)
         if app.cover_art_path and Path(app.cover_art_path).exists():
-            self._cover.set_from_file(app.cover_art_path)
+            cover: Gtk.Widget = Gtk.Picture.new_for_filename(app.cover_art_path)
+            cover.set_content_fit(Gtk.ContentFit.COVER)  # type: ignore[attr-defined]
         else:
-            self._cover.set_from_icon_name("applications-games-symbolic")
-            self._cover.set_pixel_size(64)
-        self.append(self._cover)
+            cover = Gtk.Image()
+            cover.set_from_icon_name("applications-games-symbolic")
+            cover.set_pixel_size(64)
+        cover.set_size_request(_CARD_WIDTH, 220)
+        cover.set_overflow(Gtk.Overflow.HIDDEN)
+        self.append(cover)
 
         # Label area
         label_box = Gtk.Box(

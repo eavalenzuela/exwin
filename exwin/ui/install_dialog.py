@@ -20,7 +20,12 @@ from exwin.backend.generic_installer import (  # noqa: E402
     run_wine_installer,
     scan_candidate_exes,
 )
-from exwin.backend.gog_installer import find_innoextract, find_sibling_parts, probe  # noqa: E402
+from exwin.backend.gog_installer import (  # noqa: E402
+    find_innoextract,
+    find_rar_tool,
+    find_sibling_parts,
+    probe,
+)
 from exwin.backend.install_worker import install_gog, install_gog_dlc  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.backend.winetricks import is_available as winetricks_available  # noqa: E402
@@ -127,6 +132,12 @@ class InstallDialog(Adw.Dialog):
         )
         scroll.set_child(box)
 
+        self._rar_warn_banner = Adw.Banner(
+            title="Multi-part installer requires 'unrar' or 'unar' — install one to continue.",
+            revealed=False,
+        )
+        box.append(self._rar_warn_banner)
+
         self._game_info_group = Adw.PreferencesGroup(title="Game")
         self._title_row = Adw.ActionRow(title="Title")
         self._gameid_row = Adw.ActionRow(title="GOG ID")
@@ -184,12 +195,12 @@ class InstallDialog(Adw.Dialog):
         )
         options_group.add(self._vkd3d_row)
 
-        install_btn = Gtk.Button(label="Install")
-        install_btn.add_css_class("suggested-action")
-        install_btn.add_css_class("pill")
-        install_btn.set_halign(Gtk.Align.CENTER)
-        install_btn.connect("clicked", self._on_install_clicked)
-        box.append(install_btn)
+        self._install_btn = Gtk.Button(label="Install")
+        self._install_btn.add_css_class("suggested-action")
+        self._install_btn.add_css_class("pill")
+        self._install_btn.set_halign(Gtk.Align.CENTER)
+        self._install_btn.connect("clicked", self._on_install_clicked)
+        box.append(self._install_btn)
 
         self._stack.add_named(scroll, "confirm")
 
@@ -470,8 +481,13 @@ class InstallDialog(Adw.Dialog):
         n = len(self._installer_parts)
         if n == 0:
             self._parts_row.set_subtitle("Single-file installer")
+            self._rar_warn_banner.set_revealed(False)
+            self._install_btn.set_sensitive(True)
         else:
             self._parts_row.set_subtitle(f"Multi-part: {1 + n} files ({n} .bin parts detected)")
+            missing_rar = find_rar_tool() is None
+            self._rar_warn_banner.set_revealed(missing_rar)
+            self._install_btn.set_sensitive(not missing_rar)
 
     def _on_generic_detected(self) -> None:
         self._installer_type = "generic"

@@ -34,7 +34,7 @@ class AppDetailDialog(Adw.Dialog):
         on_settings_saved: Callable[[str, AppConfig], None] | None = None,
         **kwargs,
     ) -> None:
-        super().__init__(title=app.name, content_width=440, **kwargs)
+        super().__init__(title=app.name, content_width=440, content_height=560, **kwargs)
         self._app = app
         self._config = config
         self._runtime = runtime
@@ -67,14 +67,15 @@ class AppDetailDialog(Adw.Dialog):
         scroll.set_child(content)
 
         # Cover art
-        cover = Gtk.Image()
-        cover.set_size_request(160, 220)
-        cover.set_halign(Gtk.Align.CENTER)
         if app.cover_art_path and Path(app.cover_art_path).exists():
-            cover.set_from_file(app.cover_art_path)
+            cover: Gtk.Widget = Gtk.Picture.new_for_filename(app.cover_art_path)
+            cover.set_content_fit(Gtk.ContentFit.CONTAIN)  # type: ignore[attr-defined]
         else:
+            cover = Gtk.Image()
             cover.set_from_icon_name("applications-games-symbolic")
             cover.set_pixel_size(96)
+        cover.set_size_request(160, 220)
+        cover.set_halign(Gtk.Align.CENTER)
         content.append(cover)
 
         # Name

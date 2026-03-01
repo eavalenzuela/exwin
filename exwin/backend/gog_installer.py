@@ -56,17 +56,30 @@ def probe(installer_path: Path) -> InstallerInfo:
     return _parse_info_output(output, installer_path)
 
 
+def find_rar_tool() -> str | None:
+    """Return the path to unrar or unar if available, else None."""
+    for tool in ("unrar", "unar"):
+        path = shutil.which(tool)
+        if path:
+            return path
+    return None
+
+
 def extract(
     installer_path: Path,
     output_dir: Path,
     on_progress: Callable[[str], None] | None = None,
 ) -> None:
-    """Extract the installer contents to output_dir, streaming progress lines."""
+    """Extract the installer contents to output_dir, streaming progress lines.
+
+    Passes --gog so innoextract also processes GOG-specific RAR-format .bin
+    part files (requires unrar or unar on PATH).
+    """
     binary = find_innoextract()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     proc = subprocess.Popen(
-        [binary, "--extract", "--output-dir", str(output_dir), str(installer_path)],
+        [binary, "--gog", "--extract", "--output-dir", str(output_dir), str(installer_path)],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
