@@ -85,6 +85,16 @@ def install_gog(
     game_info = parse_game_info(install_dir)
     exe_path = find_primary_exe(game_info) or guess_exe(install_dir, info.title)
 
+    # goggame-*.info stores paths relative to its own directory.  When the
+    # info file lives in install_dir/game/ (GOG RAR-layout), the raw path
+    # must be prefixed with "game/" to be relative to install_dir.
+    if exe_path and not (install_dir / exe_path).exists():
+        for subdir in ("game", "app"):
+            candidate = Path(subdir) / exe_path
+            if (install_dir / candidate).exists():
+                exe_path = str(candidate)
+                break
+
     if exe_path:
         _log(f"Primary executable: {exe_path}")
     else:
