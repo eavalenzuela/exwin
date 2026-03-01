@@ -21,6 +21,29 @@ from exwin.models import AppEntry
 _SKIP_DIRS = {"__redist", "unins", "uninstall", "setup", "vcredist", "dotnet", "isisetup"}
 _SKIP_EXES = {"unins000.exe", "uninst.exe", "uninstall.exe", "setup.exe"}
 
+_SKIP_TOP_DIRS = {"windows"}  # skip entire top-level dir under drive_c
+
+_SKIP_PROG_SUBDIRS = {  # skip these subdirs inside Program Files / Program Files (x86)
+    "internet explorer",
+    "windows nt",
+    "windows media player",
+    "steam",  # Proton inserts a fake Steam here
+    "common files",
+}
+
+_UNLIKELY_STEMS = {  # words in a stem that suggest non-game executables
+    "server",
+    "launcher",
+    "updater",
+    "patcher",
+    "config",
+    "settings",
+    "crash",
+    "bugreport",
+    "report",
+    "helper",
+}
+
 
 def detect_installer_type(installer_path: Path) -> str:
     """Return ``"innosetup"`` if the file is an InnoSetup installer, else ``"generic"``.
@@ -93,14 +116,47 @@ def scan_candidate_exes(p_root: Path, runtime: Runtime | None) -> list[Path]:
 
     candidates = []
     for exe in drive_c.rglob("*.exe"):
-        lower = exe.name.lower()
-        if lower in _SKIP_EXES:
+        try:
+            rel = exe.relative_to(drive_c)
+        except ValueError:
+            continue
+        parts = rel.parts
+        top = parts[0].lower()
+
+        if top in _SKIP_TOP_DIRS:
+            continue
+        if top in {"program files", "program files (x86)"} and len(parts) > 1:
+            if parts[1].lower() in _SKIP_PROG_SUBDIRS:
+                continue
+
+        if exe.name.lower() in _SKIP_EXES:
             continue
         if any(skip in str(exe).lower() for skip in _SKIP_DIRS):
             continue
         candidates.append(exe)
 
     return sorted(candidates, key=lambda p: (len(p.parts), p.name.lower()))
+
+
+def pick_best_exe(candidates: list[Path]) -> Path | None:
+    """Heuristically select the most likely main executable from a filtered list."""
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    def _score(exe: Path) -> tuple:
+        stem_lower = exe.stem.lower()
+        unlikely = any(word in stem_lower for word in _UNLIKELY_STEMS)
+        depth = len(exe.parts)
+        try:
+            size = exe.stat().st_size
+        except OSError:
+            size = 0
+        # lower is better: penalise unlikely names, prefer shallower, prefer larger
+        return (1 if unlikely else 0, depth, -size)
+
+    return min(candidates, key=_score)
 
 
 def finalize_generic_install(

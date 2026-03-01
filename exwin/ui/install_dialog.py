@@ -17,6 +17,7 @@ from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.generic_installer import (  # noqa: E402
     detect_installer_type,
     finalize_generic_install,
+    pick_best_exe,
     run_wine_installer,
     scan_candidate_exes,
 )
@@ -643,10 +644,6 @@ class InstallDialog(Adw.Dialog):
         assert self._generic_prefix_root is not None
         candidates = scan_candidate_exes(self._generic_prefix_root, self._generic_runtime)
 
-        # Populate the exe selection list
-        while self._exe_list.get_first_child():
-            self._exe_list.remove(self._exe_list.get_first_child())
-
         if not candidates:
             self._on_error(
                 "Wine installer finished but no executable was found in the prefix.\n"
@@ -654,24 +651,26 @@ class InstallDialog(Adw.Dialog):
             )
             return
 
-        for exe_path in candidates:
-            row = Gtk.ListBoxRow()
-            label = Gtk.Label(label=str(exe_path))
-            label.set_margin_top(8)
-            label.set_margin_bottom(8)
-            label.set_margin_start(12)
-            label.set_margin_end(12)
-            label.set_halign(Gtk.Align.START)
-            label.set_xalign(0)
-            label.set_ellipsize(3)  # END
-            row.set_child(label)
-            row.exe_path = exe_path  # type: ignore[attr-defined]
-            self._exe_list.append(row)
+        best = pick_best_exe(candidates)
+        assert self._installer_path is not None
+        if self._gog_wine_mode and self._gog_probe_info is not None:
+            app_name = self._gog_probe_info.title
+            verbs_text = self._winetricks_row.get_text().strip()
+        else:
+            app_name = self._installer_path.stem
+            verbs_text = self._generic_winetricks_row.get_text().strip()
+        verbs = verbs_text.split() if verbs_text else []
 
-        # Pre-select the first row
-        self._exe_list.select_row(self._exe_list.get_row_at_index(0))
-        self._exe_confirm_btn.set_sensitive(True)
-        self._stack.set_visible_child_name("exe_select")
+        self._stack.set_visible_child_name("installing")
+        self._install_spinner.set_spinning(True)
+        self._install_status_label.set_label("Finalising…")
+        self._log_buffer.set_text("")
+
+        threading.Thread(
+            target=self._finalize_thread,
+            args=(app_name, best, verbs),
+            daemon=True,
+        ).start()
 
     def _on_exe_row_selected(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow | None) -> None:
         self._exe_confirm_btn.set_sensitive(row is not None)
