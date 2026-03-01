@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 
 import gi
 
@@ -24,9 +25,15 @@ _COLOR_SCHEMES = [
 class SettingsPage(Adw.PreferencesPage):
     """Global preferences panel."""
 
-    def __init__(self, config: Config, runtimes: list[Runtime]) -> None:
+    def __init__(
+        self,
+        config: Config,
+        runtimes: list[Runtime],
+        on_runtimes_changed: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__()
         self._config = config
+        self._on_runtimes_changed = on_runtimes_changed
 
         # ── General group ────────────────────────────────────────────────
         general = Adw.PreferencesGroup(title="General")
@@ -66,22 +73,33 @@ class SettingsPage(Adw.PreferencesPage):
                     subtitle="Steam Proton and/or system Wine will appear here once available.",
                 )
             )
-            return
-
-        wine_group.set_description(
-            f"{len(runtimes)} runtime(s) detected. "
-            "The first entry is used by default when no per-app runtime is set."
-        )
-
-        for rt in runtimes:
-            row = Adw.ActionRow(title=rt.name, subtitle=rt.version or rt.type.capitalize())
-            icon = (
-                "media-playback-start-symbolic"
-                if rt.is_proton
-                else "application-x-executable-symbolic"
+        else:
+            wine_group.set_description(
+                f"{len(runtimes)} runtime(s) detected. "
+                "The first entry is used by default when no per-app runtime is set."
             )
-            row.add_prefix(Gtk.Image(icon_name=icon, pixel_size=16))
-            wine_group.add(row)
+
+            for rt in runtimes:
+                row = Adw.ActionRow(title=rt.name, subtitle=rt.version or rt.type.capitalize())
+                icon = (
+                    "media-playback-start-symbolic"
+                    if rt.is_proton
+                    else "application-x-executable-symbolic"
+                )
+                row.add_prefix(Gtk.Image(icon_name=icon, pixel_size=16))
+                wine_group.add(row)
+
+        # Proton-GE download row — always shown
+        ge_row = Adw.ActionRow(
+            title="Proton-GE",
+            subtitle="Download the latest GE-Proton release",
+        )
+        ge_row.add_prefix(Gtk.Image(icon_name="software-update-available-symbolic", pixel_size=16))
+        ge_btn = Gtk.Button(label="Download…", valign=Gtk.Align.CENTER)
+        ge_btn.add_css_class("flat")
+        ge_btn.connect("clicked", self._on_download_ge_clicked)
+        ge_row.add_suffix(ge_btn)
+        wine_group.add(ge_row)
 
     # ------------------------------------------------------------------
     # Handlers
@@ -93,3 +111,13 @@ class SettingsPage(Adw.PreferencesPage):
     def _on_color_scheme_changed(self, row: Adw.ComboRow, _param) -> None:
         _, scheme = _COLOR_SCHEMES[row.get_selected()]
         Adw.StyleManager.get_default().set_color_scheme(scheme)
+
+    def _on_download_ge_clicked(self, _btn: Gtk.Button) -> None:
+        from exwin.ui.proton_ge_dialog import ProtonGEDialog
+
+        def _on_installed() -> None:
+            if self._on_runtimes_changed:
+                self._on_runtimes_changed()
+
+        dialog = ProtonGEDialog(on_installed=_on_installed)
+        dialog.present(self.get_root())

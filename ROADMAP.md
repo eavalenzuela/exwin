@@ -61,7 +61,7 @@ Goal: Reliable, isolated, per-app Wine environments with configurable Proton/Win
 - [x] Detect system Wine via `which wine`
 - [x] Persist detected runtimes to DB (`sync_runtimes` upserts on every startup)
 - [x] Runtimes listed in Settings page; first detected runtime used as default
-- [ ] Support downloading/updating Proton-GE versions (M4)
+- [x] Support downloading/updating Proton-GE versions (M4)
 
 ### 2.2 Prefix Management
 - [x] Create isolated prefix root per app (`~/.local/share/exwin/prefixes/<app-id>/`)
@@ -73,7 +73,7 @@ Goal: Reliable, isolated, per-app Wine environments with configurable Proton/Win
 - [x] `run_verbs(prefix_root, verbs, runtime)` spawns winetricks with correct WINEPREFIX
 - [x] Proton bundled wine binaries used when available (WINE/WINESERVER env vars)
 - [x] Per-app verb list stored in `app.toml` under `[wine] winetricks_verbs`
-- [ ] GUI for managing winetricks deps per app (M4 polish)
+- [x] GUI for managing winetricks deps per app (M4 polish)
 
 ### 2.4 Per-App Configuration
 - [x] `AppConfig` dataclass + TOML round-trip (`apps/<app-id>/app.toml`)
@@ -81,7 +81,7 @@ Goal: Reliable, isolated, per-app Wine environments with configurable Proton/Win
 - [x] Launch arguments, Gamemode, Mangohud toggles (`[launch]` section)
 - [x] Wine DLL overrides (`[dll_overrides]` → `WINEDLLOVERRIDES`)
 - [x] Wine arch selection (`win32` / `win64`)
-- [ ] DXVK / VKD3D-Proton auto-install into prefix (M4)
+- [x] DXVK / VKD3D-Proton auto-install into prefix (M4)
 
 ### 2.5 Launch Pipeline
 - [x] `Launcher.launch()` — resolves runtime → builds env/command → spawns process
@@ -108,7 +108,7 @@ Goal: A user selects a GOG offline installer (`.exe` or multi-part set) and exwi
 - [x] `extract()` — runs `innoextract --extract`, streams output to progress callback
 - [x] Files extracted directly to `apps/<app-id>/` — no intermediate staging copy
 - [x] `goggame-<id>.info` and `goggame-<id>.hashdb` preserved in install dir for reference
-- [ ] Wine fallback for installers that require it (M4)
+- [x] Wine fallback for installers that require it (M4)
 
 ### 3.3 Post-Install Configuration
 - [x] `find_primary_exe()` — reads `playTasks[].isPrimary` from `goggame-*.info`
@@ -117,7 +117,7 @@ Goal: A user selects a GOG offline installer (`.exe` or multi-part set) and exwi
 - [x] Cover art copied to `metadata/<app-id>/cover.jpg`
 - [x] Winetricks verbs applied post-extraction (user-entered in install dialog)
 - [x] Per-app `app.toml` written with arch + verb list
-- [ ] GOG API / IGDB metadata fetch (M4)
+- [x] GOG API metadata fetch (M4)
 
 ### 3.4 App Config Database (Community / Local)
 - [x] Per-app TOML at `apps/<app-id>/app.toml` (from M2) — winetricks deps, env vars, launch args
@@ -134,7 +134,12 @@ Goal: A user selects a GOG offline installer (`.exe` or multi-part set) and exwi
 
 ## Milestone 4 — Polish & Extensibility
 
-- [ ] Support non-GOG Windows installers (generic `.exe` / NSIS / MSI install-via-Wine flow)
+- [x] Support non-GOG Windows installers (Wine-direct interactive flow + exe selection)
+- [x] DXVK / VKD3D-Proton auto-install into prefix (toggles in install dialog + app settings)
+- [x] Proton-GE download from GitHub releases (Settings → Download… → progress dialog)
+- [x] Winetricks GUI per app (App Settings dialog with verb entry + Apply Now button)
+- [x] GOG API metadata fetch post-install (description + cover art from api.gog.com)
+- [x] App config editor UI (AppSettingsDialog: exe, arch, env vars, DLL overrides, launch opts)
 - [ ] Import existing Lutris / Heroic / bottles configurations
 - [ ] Controller support / gamepad navigation in GUI
 - [ ] Flatpak / AppImage packaging

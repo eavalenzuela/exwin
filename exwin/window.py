@@ -104,7 +104,11 @@ class ExwinWindow(Adw.ApplicationWindow):
         self._library_page = LibraryPage(on_app_activated=self._on_app_activated)
         self._stack.add_named(self._library_page, "library")
 
-        self._settings_page = SettingsPage(config=config, runtimes=runtimes)
+        self._settings_page = SettingsPage(
+            config=config,
+            runtimes=runtimes,
+            on_runtimes_changed=self._on_runtimes_changed,
+        )
         self._stack.add_named(self._settings_page, "settings")
 
         # ── Bindings ────────────────────────────────────────────────────
@@ -157,9 +161,12 @@ class ExwinWindow(Adw.ApplicationWindow):
         dialog = AppDetailDialog(
             app=app,
             is_running=self._launcher.is_running(app.app_id),
+            config=self._config,
+            runtime=self._resolve_runtime(app),
             on_launch=self._launch_app,
             on_stop=self._stop_app,
             on_uninstall=self._uninstall_app,
+            on_settings_saved=self._on_app_config_saved,
         )
         dialog.present(self)
 
@@ -174,6 +181,25 @@ class ExwinWindow(Adw.ApplicationWindow):
     def _on_app_installed(self, app: AppEntry) -> None:
         self.refresh_library()
         self.show_toast(f'"{app.name}" added to library')
+
+    def _on_app_config_saved(self, app_id: str, app_config) -> None:  # noqa: ANN001
+        self.refresh_library()
+        self.show_toast("Settings saved")
+
+    def _on_runtimes_changed(self) -> None:
+        from exwin.backend.runtime import scan_runtimes
+        from exwin.db.runtimes import sync_runtimes
+
+        self._runtimes = sync_runtimes(scan_runtimes())
+        # Rebuild settings page with updated runtimes
+        self._stack.remove(self._settings_page)
+        self._settings_page = SettingsPage(
+            config=self._config,
+            runtimes=self._runtimes,
+            on_runtimes_changed=self._on_runtimes_changed,
+        )
+        self._stack.add_named(self._settings_page, "settings")
+        self.show_toast(f"{len(self._runtimes)} runtime(s) detected")
 
     # ------------------------------------------------------------------
     # App lifecycle

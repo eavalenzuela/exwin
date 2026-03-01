@@ -35,6 +35,10 @@ class AppConfig:
     # e.g. {"d3d11": "n,b", "dxgi": "n,b"}
     dll_overrides: dict[str, str] = field(default_factory=dict)
 
+    # DirectX translation layers installed into the prefix
+    dxvk: bool = False
+    vkd3d: bool = False
+
 
 def load_app_config(app_id: str, config: Config) -> AppConfig:
     """Load per-app config from TOML, returning defaults if the file doesn't exist."""
@@ -55,6 +59,8 @@ def load_app_config(app_id: str, config: Config) -> AppConfig:
         gamemode=launch.get("gamemode", False),
         mangohud=launch.get("mangohud", False),
         dll_overrides=raw.get("dll_overrides", {}),
+        dxvk=wine.get("dxvk", False),
+        vkd3d=wine.get("vkd3d", False),
     )
 
 
@@ -67,6 +73,8 @@ def save_app_config(app_id: str, config: Config, app_config: AppConfig) -> None:
         "wine": {
             "arch": app_config.arch,
             "winetricks_verbs": app_config.winetricks_verbs,
+            "dxvk": app_config.dxvk,
+            "vkd3d": app_config.vkd3d,
         },
         "env": app_config.env,
         "launch": {

@@ -28,9 +28,9 @@ def insert_app(app: AppEntry) -> None:
         conn.execute(
             """
             INSERT INTO apps (id, name, source, install_path, prefix_path, exe_path,
-                              cover_art_path, description, install_date)
+                              runtime_id, cover_art_path, description, install_date)
             VALUES (:id, :name, :source, :install_path, :prefix_path, :exe_path,
-                    :cover_art_path, :description, :install_date)
+                    :runtime_id, :cover_art_path, :description, :install_date)
             """,
             {
                 "id": app.app_id,
@@ -39,6 +39,7 @@ def insert_app(app: AppEntry) -> None:
                 "install_path": app.install_path,
                 "prefix_path": app.prefix_path,
                 "exe_path": app.exe_path,
+                "runtime_id": app.runtime_id,
                 "cover_art_path": app.cover_art_path,
                 "description": app.description,
                 "install_date": app.install_date,
@@ -49,3 +50,13 @@ def insert_app(app: AppEntry) -> None:
 def update_last_launched(app_id: str, timestamp: str) -> None:
     with get_conn() as conn:
         conn.execute("UPDATE apps SET last_launched = ? WHERE id = ?", (timestamp, app_id))
+
+
+def update_description(app_id: str, description: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE apps SET description = ? WHERE id = ?", (description, app_id))
+
+
+def update_cover_art(app_id: str, path: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE apps SET cover_art_path = ? WHERE id = ?", (path, app_id))

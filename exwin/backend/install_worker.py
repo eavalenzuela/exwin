@@ -9,6 +9,7 @@ from pathlib import Path
 
 from exwin.backend.app_config import AppConfig, save_app_config
 from exwin.backend.config import Config
+from exwin.backend.dxvk import install_dxvk, install_vkd3d
 from exwin.backend.gog_installer import (
     app_id_from_info,
     extract,
@@ -18,6 +19,7 @@ from exwin.backend.gog_installer import (
     parse_game_info,
     probe,
 )
+from exwin.backend.gog_metadata import apply_metadata
 from exwin.backend.prefix import create_prefix, prefix_root
 from exwin.backend.runtime import Runtime
 from exwin.backend.winetricks import is_available as winetricks_available
@@ -32,6 +34,8 @@ def install_gog(
     runtime: Runtime | None,
     arch: str = "win64",
     winetricks_verbs: list[str] | None = None,
+    dxvk: bool = False,
+    vkd3d: bool = False,
     on_progress: Callable[[str], None] | None = None,
 ) -> AppEntry:
     """Full GOG install pipeline.  Intended to run in a background thread.
@@ -124,8 +128,23 @@ def install_gog(
                 f"winetricks finished (exit code {rc}){'.' if rc == 0 else ' — check logs for errors.'}"
             )
 
+    # ── 6b. DXVK / VKD3D-Proton ──────────────────────────────────────────
+    if dxvk:
+        _log("Installing DXVK…")
+        try:
+            install_dxvk(p_root, runtime, on_progress=_log)
+        except Exception as exc:
+            _log(f"DXVK install failed: {exc}")
+
+    if vkd3d:
+        _log("Installing vkd3d-proton…")
+        try:
+            install_vkd3d(p_root, runtime, on_progress=_log)
+        except Exception as exc:
+            _log(f"vkd3d-proton install failed: {exc}")
+
     # ── 7. Save app config ───────────────────────────────────────────────
-    app_config = AppConfig(arch=arch, winetricks_verbs=verbs)
+    app_config = AppConfig(arch=arch, winetricks_verbs=verbs, dxvk=dxvk, vkd3d=vkd3d)
     save_app_config(app_id, config, app_config)
 
     # ── 8. Insert into DB ────────────────────────────────────────────────
@@ -141,6 +160,13 @@ def install_gog(
         runtime_id=runtime.db_id if runtime else None,
     )
     insert_app(app)
+
+    # ── 9. GOG metadata fetch (non-fatal) ────────────────────────────────
+    if info.game_id:
+        try:
+            apply_metadata(app_id, info.game_id, config, on_progress=_log)
+        except Exception:
+            _log("Metadata fetch failed — skipping.")
 
     _log(f'✓ "{info.title}" installed successfully.')
     return app

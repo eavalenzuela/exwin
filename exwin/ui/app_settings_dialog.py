@@ -1,0 +1,345 @@
+"""Per-app configuration editor dialog."""
+
+from __future__ import annotations
+
+import threading
+from collections.abc import Callable
+from pathlib import Path
+
+import gi
+
+gi.require_version("Adw", "1")
+gi.require_version("Gtk", "4.0")
+
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
+
+from exwin.backend.app_config import AppConfig, save_app_config  # noqa: E402
+from exwin.backend.config import Config  # noqa: E402
+from exwin.backend.runtime import Runtime  # noqa: E402
+from exwin.backend.winetricks import is_available as winetricks_available  # noqa: E402
+from exwin.backend.winetricks import run_verbs  # noqa: E402
+from exwin.models import AppEntry  # noqa: E402
+
+_ARCH_OPTIONS = ["win64", "win32"]
+
+
+class AppSettingsDialog(Adw.Dialog):
+    """Edit per-app configuration (exe path, Wine options, env vars, etc.)."""
+
+    def __init__(
+        self,
+        app: AppEntry,
+        app_config: AppConfig,
+        config: Config,
+        runtime: Runtime | None,
+        on_saved: Callable[[AppConfig], None],
+        **kwargs,
+    ) -> None:
+        super().__init__(title=f"{app.name} — Settings", content_width=520, **kwargs)
+        self._app = app
+        self._app_config = app_config
+        self._config = config
+        self._runtime = runtime
+        self._on_saved = on_saved
+
+        toolbar_view = Adw.ToolbarView()
+        self.set_child(toolbar_view)
+
+        header = Adw.HeaderBar()
+        toolbar_view.add_top_bar(header)
+
+        scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        toolbar_view.set_content(scroll)
+
+        prefs = Adw.PreferencesPage()
+        scroll.set_child(prefs)
+
+        self._build_executable_group(prefs, app, app_config)
+        self._build_wine_group(prefs, app_config)
+        self._build_launch_group(prefs, app_config)
+        self._build_env_group(prefs, app_config)
+        self._build_dll_group(prefs, app_config)
+        self._build_action_row(toolbar_view)
+
+    # ------------------------------------------------------------------
+    # Group builders
+    # ------------------------------------------------------------------
+
+    def _build_executable_group(
+        self, prefs: Adw.PreferencesPage, app: AppEntry, cfg: AppConfig
+    ) -> None:
+        group = Adw.PreferencesGroup(title="Executable")
+        prefs.add(group)
+
+        self._exe_row = Adw.EntryRow(title="Executable path")
+        self._exe_row.set_text(app.exe_path or "")
+        self._exe_row.set_tooltip_text(
+            "Path to the main executable, relative to the install directory"
+        )
+
+        browse_btn = Gtk.Button(icon_name="document-open-symbolic")
+        browse_btn.add_css_class("flat")
+        browse_btn.set_valign(Gtk.Align.CENTER)
+        browse_btn.connect("clicked", self._on_browse_exe)
+        self._exe_row.add_suffix(browse_btn)
+        group.add(self._exe_row)
+
+    def _build_wine_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
+        group = Adw.PreferencesGroup(title="Wine / Proton")
+        prefs.add(group)
+
+        self._arch_row = Adw.ComboRow(title="Architecture")
+        self._arch_row.set_model(Gtk.StringList.new(_ARCH_OPTIONS))
+        self._arch_row.set_selected(0 if cfg.arch == "win64" else 1)
+        group.add(self._arch_row)
+
+        self._dxvk_row = Adw.SwitchRow(
+            title="DXVK",
+            subtitle="DirectX 9/10/11 → Vulkan translation (requires winetricks)",
+        )
+        self._dxvk_row.set_active(cfg.dxvk)
+        group.add(self._dxvk_row)
+
+        self._vkd3d_row = Adw.SwitchRow(
+            title="VKD3D-Proton",
+            subtitle="DirectX 12 → Vulkan translation",
+        )
+        self._vkd3d_row.set_active(cfg.vkd3d)
+        group.add(self._vkd3d_row)
+
+        self._winetricks_row = Adw.EntryRow(title="Winetricks verbs")
+        self._winetricks_row.set_text(" ".join(cfg.winetricks_verbs))
+        self._winetricks_row.set_tooltip_text(
+            "Space-separated list of winetricks verbs, e.g.: vcredist2019 dxvk"
+        )
+        if not winetricks_available():
+            self._winetricks_row.set_sensitive(False)
+            self._winetricks_row.set_title("Winetricks verbs (winetricks not installed)")
+        group.add(self._winetricks_row)
+
+    def _build_launch_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
+        group = Adw.PreferencesGroup(title="Launch Options")
+        prefs.add(group)
+
+        self._gamemode_row = Adw.SwitchRow(
+            title="Gamemode",
+            subtitle="Run via gamemoderun for CPU scheduling optimisations",
+        )
+        self._gamemode_row.set_active(cfg.gamemode)
+        group.add(self._gamemode_row)
+
+        self._mangohud_row = Adw.SwitchRow(
+            title="MangoHud",
+            subtitle="Overlay FPS and hardware stats",
+        )
+        self._mangohud_row.set_active(cfg.mangohud)
+        group.add(self._mangohud_row)
+
+        self._args_row = Adw.EntryRow(title="Extra launch arguments")
+        self._args_row.set_text(" ".join(cfg.launch_args))
+        self._args_row.set_tooltip_text("Space-separated arguments passed to the executable")
+        group.add(self._args_row)
+
+    def _build_env_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
+        group = Adw.PreferencesGroup(
+            title="Environment Variables",
+            description="One KEY=VALUE per line",
+        )
+        prefs.add(group)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_size_request(-1, 100)
+
+        self._env_view = Gtk.TextView(
+            monospace=True, top_margin=8, bottom_margin=8, left_margin=8, right_margin=8
+        )
+        self._env_view.add_css_class("card")
+        env_text = "\n".join(f"{k}={v}" for k, v in cfg.env.items())
+        self._env_view.get_buffer().set_text(env_text)
+        scroll.set_child(self._env_view)
+
+        row = Adw.ActionRow()
+        row.set_child(scroll)
+        group.add(row)
+
+    def _build_dll_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
+        group = Adw.PreferencesGroup(
+            title="DLL Overrides",
+            description="One DLL_NAME=override_type per line, e.g.: d3d11=n,b",
+        )
+        prefs.add(group)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_size_request(-1, 80)
+
+        self._dll_view = Gtk.TextView(
+            monospace=True, top_margin=8, bottom_margin=8, left_margin=8, right_margin=8
+        )
+        self._dll_view.add_css_class("card")
+        dll_text = "\n".join(f"{k}={v}" for k, v in cfg.dll_overrides.items())
+        self._dll_view.get_buffer().set_text(dll_text)
+        scroll.set_child(self._dll_view)
+
+        row = Adw.ActionRow()
+        row.set_child(scroll)
+        group.add(row)
+
+    def _build_action_row(self, toolbar_view: Adw.ToolbarView) -> None:
+        bar = Gtk.ActionBar()
+        toolbar_view.add_bottom_bar(bar)
+
+        if winetricks_available():
+            self._apply_wt_btn = Gtk.Button(label="Apply Winetricks Now")
+            self._apply_wt_btn.add_css_class("flat")
+            self._apply_wt_btn.connect("clicked", self._on_apply_winetricks)
+            bar.pack_start(self._apply_wt_btn)
+
+        save_btn = Gtk.Button(label="Save")
+        save_btn.add_css_class("suggested-action")
+        save_btn.add_css_class("pill")
+        save_btn.connect("clicked", self._on_save)
+        bar.pack_end(save_btn)
+
+    # ------------------------------------------------------------------
+    # Handlers
+    # ------------------------------------------------------------------
+
+    def _on_browse_exe(self, _btn: Gtk.Button) -> None:
+        from gi.repository import Gio
+
+        f = Gtk.FileFilter()
+        f.set_name("Windows Executables (*.exe)")
+        f.add_pattern("*.exe")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(f)
+
+        dialog = Gtk.FileDialog(title="Select Executable", filters=filters)
+        # Start browsing from the install directory if it exists
+        start = Path(self._app.install_path) if self._app.install_path else Path.home()
+        if start.exists():
+            from gi.repository import Gio as _Gio
+
+            dialog.set_initial_folder(_Gio.File.new_for_path(str(start)))
+
+        dialog.open(self.get_root(), None, self._on_exe_chosen)
+
+    def _on_exe_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        from gi.repository import GLib as _GLib
+
+        try:
+            gfile = dialog.open_finish(result)
+        except _GLib.Error:
+            return
+
+        chosen = Path(gfile.get_path())
+        install = Path(self._app.install_path) if self._app.install_path else None
+        if install:
+            try:
+                rel = chosen.relative_to(install)
+                self._exe_row.set_text(str(rel))
+                return
+            except ValueError:
+                pass
+        self._exe_row.set_text(str(chosen))
+
+    def _on_save(self, _btn: Gtk.Button) -> None:
+        cfg = self._read_config()
+        save_app_config(self._app.app_id, self._config, cfg)
+
+        # Persist exe_path change to DB
+        new_exe = self._exe_row.get_text().strip()
+        if new_exe != (self._app.exe_path or ""):
+            from exwin.db.schema import get_conn
+
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE apps SET exe_path = ? WHERE id = ?",
+                    (new_exe, self._app.app_id),
+                )
+
+        self._on_saved(cfg)
+        self.close()
+
+    def _on_apply_winetricks(self, _btn: Gtk.Button) -> None:
+        verbs_text = self._winetricks_row.get_text().strip()
+        verbs = verbs_text.split() if verbs_text else []
+        if not verbs:
+            return
+
+        self._apply_wt_btn.set_sensitive(False)
+        self._apply_wt_btn.set_label("Applying…")
+
+        from pathlib import Path as _Path
+
+        p_root = _Path(self._app.prefix_path)
+        threading.Thread(
+            target=self._winetricks_thread,
+            args=(p_root, verbs),
+            daemon=True,
+        ).start()
+
+    def _winetricks_thread(self, p_root: Path, verbs: list[str]) -> None:
+        try:
+            proc = run_verbs(p_root, verbs, self._runtime)
+            proc.wait()
+            ok = proc.returncode == 0
+        except Exception:
+            ok = False
+        GLib.idle_add(self._on_winetricks_done, ok)
+
+    def _on_winetricks_done(self, success: bool) -> None:
+        self._apply_wt_btn.set_sensitive(True)
+        self._apply_wt_btn.set_label("Apply Winetricks Now")
+        # Show result via the parent window's toast if we can reach it
+        root = self.get_root()
+        if hasattr(root, "show_toast"):
+            msg = "Winetricks verbs applied." if success else "Winetricks failed — check logs."
+            root.show_toast(msg)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _read_config(self) -> AppConfig:
+        verbs_text = self._winetricks_row.get_text().strip()
+        verbs = verbs_text.split() if verbs_text else []
+
+        args_text = self._args_row.get_text().strip()
+        launch_args = args_text.split() if args_text else []
+
+        env = _parse_kv_text(self._env_view.get_buffer())
+        dll_overrides = _parse_kv_text(self._dll_view.get_buffer())
+
+        return AppConfig(
+            arch=_ARCH_OPTIONS[self._arch_row.get_selected()],
+            winetricks_verbs=verbs,
+            dxvk=self._dxvk_row.get_active(),
+            vkd3d=self._vkd3d_row.get_active(),
+            env=env,
+            launch_args=launch_args,
+            gamemode=self._gamemode_row.get_active(),
+            mangohud=self._mangohud_row.get_active(),
+            dll_overrides=dll_overrides,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_kv_text(buf: Gtk.TextBuffer) -> dict[str, str]:
+    """Parse a multi-line KEY=VALUE TextBuffer into a dict, ignoring blank/comment lines."""
+    text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+    result: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            k, _, v = line.partition("=")
+            result[k.strip()] = v.strip()
+    return result

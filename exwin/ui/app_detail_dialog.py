@@ -13,6 +13,9 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, Gtk  # noqa: E402
 
+from exwin.backend.app_config import AppConfig, load_app_config  # noqa: E402
+from exwin.backend.config import Config  # noqa: E402
+from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.models import AppEntry  # noqa: E402
 
 
@@ -23,22 +26,34 @@ class AppDetailDialog(Adw.Dialog):
         self,
         app: AppEntry,
         is_running: bool,
+        config: Config,
+        runtime: Runtime | None,
         on_launch: Callable[[AppEntry], None],
         on_stop: Callable[[AppEntry], None],
         on_uninstall: Callable[[AppEntry], None],
+        on_settings_saved: Callable[[str, AppConfig], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(title=app.name, content_width=440, **kwargs)
         self._app = app
+        self._config = config
+        self._runtime = runtime
         self._on_launch = on_launch
         self._on_stop = on_stop
         self._on_uninstall = on_uninstall
+        self._on_settings_saved = on_settings_saved
 
         toolbar_view = Adw.ToolbarView()
         self.set_child(toolbar_view)
 
         header = Adw.HeaderBar()
         toolbar_view.add_top_bar(header)
+
+        settings_btn = Gtk.Button(icon_name="preferences-system-symbolic")
+        settings_btn.add_css_class("flat")
+        settings_btn.set_tooltip_text("App Settings")
+        settings_btn.connect("clicked", self._on_settings_clicked)
+        header.pack_end(settings_btn)
 
         scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -143,6 +158,23 @@ class AppDetailDialog(Adw.Dialog):
     # ------------------------------------------------------------------
     # Button handlers
     # ------------------------------------------------------------------
+
+    def _on_settings_clicked(self, _btn: Gtk.Button) -> None:
+        from exwin.ui.app_settings_dialog import AppSettingsDialog
+
+        app_config = load_app_config(self._app.app_id, self._config)
+        dialog = AppSettingsDialog(
+            app=self._app,
+            app_config=app_config,
+            config=self._config,
+            runtime=self._runtime,
+            on_saved=self._on_app_settings_saved,
+        )
+        dialog.present(self.get_root())
+
+    def _on_app_settings_saved(self, app_config: AppConfig) -> None:
+        if self._on_settings_saved:
+            self._on_settings_saved(self._app.app_id, app_config)
 
     def _on_launch_clicked(self, _btn: Gtk.Button) -> None:
         self._on_launch(self._app)
