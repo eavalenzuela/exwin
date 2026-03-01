@@ -117,7 +117,16 @@ def apply_custom_cover_art(app_id: str, source: str, config: Config) -> str:
     meta_dir.mkdir(parents=True, exist_ok=True)
     dst = meta_dir / "cover.jpg"
 
-    if source.startswith(("http://", "https://")):
+    if source.startswith("data:image/"):
+        import base64
+
+        try:
+            _header, b64data = source.split(",", 1)
+            image_bytes = base64.b64decode(b64data)
+        except Exception as exc:
+            raise ValueError(f"Invalid base64 image data: {exc}") from exc
+        dst.write_bytes(image_bytes)
+    elif source.startswith(("http://", "https://")):
         _download_image(source, dst)
     else:
         src = Path(source)

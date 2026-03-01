@@ -177,7 +177,7 @@ class AppSettingsDialog(Adw.Dialog):
     def _build_cover_art_group(self, prefs: Adw.PreferencesPage, app: AppEntry) -> None:
         group = Adw.PreferencesGroup(
             title="Cover Art",
-            description="Local file path or image URL. Leave blank to keep existing art.",
+            description="Local file path, image URL, or base64 data URI (data:image/…;base64,…). Leave blank to keep existing art.",
         )
         prefs.add(group)
 

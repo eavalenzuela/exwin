@@ -1,4 +1,7 @@
-"""Global application configuration, stored at $data_dir/config.toml."""
+"""Global application configuration, stored at $data_dir/config.toml.
+
+Default data directory: ~/.exwin/
+"""
 
 from __future__ import annotations
 
@@ -8,7 +11,7 @@ from pathlib import Path
 
 import tomli_w
 
-_DEFAULT_DATA_DIR = Path.home() / ".local" / "share" / "exwin"
+_DEFAULT_DATA_DIR = Path.home() / ".exwin"
 _CONFIG_FILENAME = "config.toml"
 
 
