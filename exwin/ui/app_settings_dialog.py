@@ -35,7 +35,9 @@ class AppSettingsDialog(Adw.Dialog):
         on_saved: Callable[[AppConfig], None],
         **kwargs,
     ) -> None:
-        super().__init__(title=f"{app.name} — Settings", content_width=520, **kwargs)
+        super().__init__(
+            title=f"{app.name} — Settings", content_width=520, content_height=720, **kwargs
+        )
         self._app = app
         self._app_config = app_config
         self._config = config
