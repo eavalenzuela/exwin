@@ -27,7 +27,7 @@ class Config:
     data_dir: Path = field(default_factory=lambda: _DEFAULT_DATA_DIR)
     default_runtime: str = ""  # empty = auto-detect
     color_scheme: str = "system"  # "system" | "light" | "dark"
-    prefix_root: Path | None = None  # None = use data_dir/prefixes (default)
+    storage_root: Path | None = None  # None = use data_dir/{apps,prefixes} (default)
 
     # ------------------------------------------------------------------ #
     # Derived paths (not stored; computed from data_dir)
@@ -43,11 +43,13 @@ class Config:
 
     @property
     def prefixes_dir(self) -> Path:
-        return self.prefix_root if self.prefix_root is not None else self.data_dir / "prefixes"
+        base = self.storage_root if self.storage_root is not None else self.data_dir
+        return base / "prefixes"
 
     @property
     def apps_dir(self) -> Path:
-        return self.data_dir / "apps"
+        base = self.storage_root if self.storage_root is not None else self.data_dir
+        return base / "apps"
 
     @property
     def runtimes_dir(self) -> Path:
@@ -84,12 +86,12 @@ class Config:
         with open(config_path, "rb") as f:
             raw = tomllib.load(f)
 
-        raw_pr = raw.get("prefix_root")
+        raw_sr = raw.get("storage_root")
         cfg = cls(
             data_dir=base_dir,  # env var always wins; TOML value is informational only
             default_runtime=raw.get("default_runtime", ""),
             color_scheme=raw.get("color_scheme", "system"),
-            prefix_root=Path(raw_pr) if raw_pr else None,
+            storage_root=Path(raw_sr) if raw_sr else None,
         )
         cfg._ensure_dirs()
         return cfg
@@ -102,8 +104,8 @@ class Config:
             "default_runtime": self.default_runtime,
             "color_scheme": self.color_scheme,
         }
-        if self.prefix_root is not None:
-            data["prefix_root"] = str(self.prefix_root)
+        if self.storage_root is not None:
+            data["storage_root"] = str(self.storage_root)
         with open(self.config_path, "wb") as f:
             tomli_w.dump(data, f)
 

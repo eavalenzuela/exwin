@@ -53,12 +53,12 @@ class SettingsPage(Adw.PreferencesPage):
         dir_row.add_suffix(open_btn)
         general.add(dir_row)
 
-        # Prefix storage directory
-        prefix_row = Adw.EntryRow(title="Prefix Storage Directory")
-        prefix_row.set_text(str(config.prefix_root) if config.prefix_root else "")
+        # Games storage root (covers both installs and prefixes)
+        prefix_row = Adw.EntryRow(title="Games Storage Directory")
+        prefix_row.set_text(str(config.storage_root) if config.storage_root else "")
         prefix_row.set_tooltip_text(
-            "Root folder for all new Wine prefixes. "
-            "Leave blank to use the default (data_dir/prefixes/). "
+            "Root folder for all new game installs and Wine prefixes. "
+            "Leave blank to use the default (data_dir/). "
             "Existing installs are unaffected."
         )
         browse_btn = Gtk.Button(icon_name="folder-open-symbolic")
@@ -136,7 +136,7 @@ class SettingsPage(Adw.PreferencesPage):
 
     def _on_prefix_root_changed(self, row: Adw.EntryRow, _param) -> None:
         v = row.get_text().strip()
-        self._config.prefix_root = Path(v) if v else None
+        self._config.storage_root = Path(v) if v else None
         self._config.save()
 
     def _on_browse_prefix_root(self, _btn: Gtk.Button) -> None:

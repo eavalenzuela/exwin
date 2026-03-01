@@ -111,33 +111,41 @@ class TestSaveAndLoad:
         assert str(tmp_config.data_dir) in raw
 
 
-class TestPrefixRoot:
-    def test_prefix_root_default_is_none(self, tmp_config: Config) -> None:
-        assert tmp_config.prefix_root is None
+class TestStorageRoot:
+    def test_storage_root_default_is_none(self, tmp_config: Config) -> None:
+        assert tmp_config.storage_root is None
 
-    def test_prefixes_dir_uses_data_dir_when_prefix_root_none(self, tmp_config: Config) -> None:
+    def test_prefixes_dir_uses_data_dir_when_storage_root_none(self, tmp_config: Config) -> None:
         assert tmp_config.prefixes_dir == tmp_config.data_dir / "prefixes"
 
-    def test_prefixes_dir_uses_prefix_root_when_set(self, tmp_config: Config, tmp_path: Path) -> None:
-        custom = tmp_path / "myprefixes"
-        tmp_config.prefix_root = custom
-        assert tmp_config.prefixes_dir == custom
+    def test_apps_dir_uses_data_dir_when_storage_root_none(self, tmp_config: Config) -> None:
+        assert tmp_config.apps_dir == tmp_config.data_dir / "apps"
 
-    def test_prefix_root_roundtrip(self, tmp_config: Config, tmp_path: Path) -> None:
-        custom = tmp_path / "external" / "prefixes"
-        tmp_config.prefix_root = custom
+    def test_prefixes_dir_uses_storage_root_when_set(self, tmp_config: Config, tmp_path: Path) -> None:
+        custom = tmp_path / "external"
+        tmp_config.storage_root = custom
+        assert tmp_config.prefixes_dir == custom / "prefixes"
+
+    def test_apps_dir_uses_storage_root_when_set(self, tmp_config: Config, tmp_path: Path) -> None:
+        custom = tmp_path / "external"
+        tmp_config.storage_root = custom
+        assert tmp_config.apps_dir == custom / "apps"
+
+    def test_storage_root_roundtrip(self, tmp_config: Config, tmp_path: Path) -> None:
+        custom = tmp_path / "external"
+        tmp_config.storage_root = custom
         tmp_config.save()
         loaded = _load_from(tmp_config.data_dir)
-        assert loaded.prefix_root == custom
+        assert loaded.storage_root == custom
 
-    def test_prefix_root_absent_from_toml_when_none(self, tmp_config: Config) -> None:
+    def test_storage_root_absent_from_toml_when_none(self, tmp_config: Config) -> None:
         import tomllib
 
-        tmp_config.prefix_root = None
+        tmp_config.storage_root = None
         tmp_config.save()
         with open(tmp_config.config_path, "rb") as f:
             raw = tomllib.load(f)
-        assert "prefix_root" not in raw
+        assert "storage_root" not in raw
 
 
 def _load_from(data_dir: Path) -> Config:
@@ -147,11 +155,11 @@ def _load_from(data_dir: Path) -> Config:
     config_path = data_dir / "config.toml"
     with open(config_path, "rb") as f:
         raw = tomllib.load(f)
-    raw_pr = raw.get("prefix_root")
+    raw_sr = raw.get("storage_root")
     cfg = Config(
         data_dir=Path(raw.get("data_dir", data_dir)),
         default_runtime=raw.get("default_runtime", ""),
         color_scheme=raw.get("color_scheme", "system"),
-        prefix_root=Path(raw_pr) if raw_pr else None,
+        storage_root=Path(raw_sr) if raw_sr else None,
     )
     return cfg
