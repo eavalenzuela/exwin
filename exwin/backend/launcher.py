@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import threading
 from collections.abc import Callable
@@ -106,9 +107,10 @@ class Launcher:
         cmd.extend(app_config.launch_args)
 
         # Optional wrappers — prepended in reverse order of precedence
-        if app_config.mangohud:
+        # Only add if the binary is available; silently skip if not installed.
+        if app_config.mangohud and shutil.which("mangohud"):
             cmd = ["mangohud"] + cmd
-        if app_config.gamemode:
+        if app_config.gamemode and shutil.which("gamemoderun"):
             cmd = ["gamemoderun"] + cmd
 
         return cmd
