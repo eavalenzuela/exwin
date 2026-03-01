@@ -15,6 +15,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from exwin.backend.app_config import AppConfig, save_app_config  # noqa: E402
 from exwin.backend.config import Config  # noqa: E402
+from exwin.backend.gog_metadata import apply_custom_cover_art  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.backend.winetricks import is_available as winetricks_available  # noqa: E402
 from exwin.backend.winetricks import run_verbs  # noqa: E402
@@ -61,6 +62,7 @@ class AppSettingsDialog(Adw.Dialog):
         self._build_wine_group(prefs, app_config)
         self._build_launch_group(prefs, app_config)
         self._build_gpu_group(prefs, app_config)
+        self._build_cover_art_group(prefs, app)
         self._build_env_group(prefs, app_config)
         self._build_dll_group(prefs, app_config)
         self._build_action_row(toolbar_view)
@@ -171,6 +173,24 @@ class AppSettingsDialog(Adw.Dialog):
             self._gpu_row.set_selected(0)
 
         group.add(self._gpu_row)
+
+    def _build_cover_art_group(self, prefs: Adw.PreferencesPage, app: AppEntry) -> None:
+        group = Adw.PreferencesGroup(
+            title="Cover Art",
+            description="Local file path or image URL. Leave blank to keep existing art.",
+        )
+        prefs.add(group)
+
+        self._cover_row = Adw.EntryRow(title="Local path or URL")
+        self._cover_row.set_text(app.cover_art_path or "")
+
+        browse_btn = Gtk.Button(icon_name="document-open-symbolic")
+        browse_btn.add_css_class("flat")
+        browse_btn.set_valign(Gtk.Align.CENTER)
+        browse_btn.connect("clicked", self._on_browse_cover)
+        self._cover_row.add_suffix(browse_btn)
+
+        group.add(self._cover_row)
 
     def _build_env_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
         group = Adw.PreferencesGroup(
@@ -291,8 +311,62 @@ class AppSettingsDialog(Adw.Dialog):
                     (new_exe, self._app.app_id),
                 )
 
+        cover_source = self._cover_row.get_text().strip()
+        current_cover = self._app.cover_art_path or ""
+        if cover_source and cover_source != current_cover:
+            _btn.set_sensitive(False)
+            _btn.set_label("Saving…")
+            threading.Thread(
+                target=self._cover_art_thread,
+                args=(cfg, cover_source, _btn),
+                daemon=True,
+            ).start()
+            return  # dialog closed by _finish_save or _on_cover_error
+
         self._on_saved(cfg)
         self.close()
+
+    def _on_browse_cover(self, _btn: Gtk.Button) -> None:
+        from gi.repository import Gio
+
+        f = Gtk.FileFilter()
+        f.set_name("Images (*.jpg *.jpeg *.png *.webp)")
+        for pat in ("*.jpg", "*.jpeg", "*.png", "*.webp"):
+            f.add_pattern(pat)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(f)
+
+        dialog = Gtk.FileDialog(title="Select Cover Art", filters=filters)
+        dialog.open(self.get_root(), None, self._on_cover_chosen)
+
+    def _on_cover_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        from gi.repository import GLib as _GLib
+
+        try:
+            gfile = dialog.open_finish(result)
+        except _GLib.Error:
+            return
+        self._cover_row.set_text(gfile.get_path())
+
+    def _cover_art_thread(self, cfg: AppConfig, source: str, btn: Gtk.Button) -> None:
+        try:
+            apply_custom_cover_art(self._app.app_id, source, self._config)
+        except Exception as exc:
+            GLib.idle_add(self._on_cover_error, str(exc), btn)
+            return
+        GLib.idle_add(self._finish_save, cfg)
+
+    def _finish_save(self, cfg: AppConfig) -> None:
+        self._on_saved(cfg)
+        self.close()
+
+    def _on_cover_error(self, message: str, btn: Gtk.Button) -> None:
+        btn.set_sensitive(True)
+        btn.set_label("Save")
+        self._cover_row.add_css_class("error")
+        root = self.get_root()
+        if hasattr(root, "show_toast"):
+            root.show_toast(f"Cover art error: {message}")
 
     def _on_apply_winetricks(self, _btn: Gtk.Button) -> None:
         verbs_text = self._winetricks_row.get_text().strip()

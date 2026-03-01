@@ -100,3 +100,30 @@ def _download_image(url: str, dest: Path) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": "exwin/1.0"})
     with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp, open(dest, "wb") as f:
         shutil.copyfileobj(resp, f)
+
+
+# ---------------------------------------------------------------------------
+# Public helpers
+# ---------------------------------------------------------------------------
+
+
+def apply_custom_cover_art(app_id: str, source: str, config: Config) -> str:
+    """Copy a local image or download a URL as the cover art for *app_id*.
+
+    Caches to ``~/.local/share/exwin/metadata/{app_id}/cover.jpg``.
+    Updates the DB and returns the destination path string.
+    """
+    meta_dir = config.metadata_dir / app_id
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    dst = meta_dir / "cover.jpg"
+
+    if source.startswith(("http://", "https://")):
+        _download_image(source, dst)
+    else:
+        src = Path(source)
+        if not src.exists():
+            raise FileNotFoundError(f"File not found: {source}")
+        shutil.copy2(src, dst)
+
+    update_cover_art(app_id, str(dst))
+    return str(dst)
