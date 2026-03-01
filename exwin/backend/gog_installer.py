@@ -97,18 +97,17 @@ def extract(
 
 
 def parse_game_info(install_dir: Path) -> dict:
-    """Parse the goggame-*.info JSON placed in install_dir by innoextract."""
-    for info_file in install_dir.glob("goggame-*.info"):
-        try:
-            return json.loads(info_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-    # Also check app/ subdirectory (some GOG installers use it)
-    for info_file in (install_dir / "app").glob("goggame-*.info"):
-        try:
-            return json.loads(info_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
+    """Parse the goggame-*.info JSON placed in install_dir by innoextract.
+
+    Checks install_dir/, app/ (InnoSetup single-part layout), and game/
+    (GOG RAR-part layout produced by the unar / 7z extraction path).
+    """
+    for subdir in (install_dir, install_dir / "app", install_dir / "game"):
+        for info_file in subdir.glob("goggame-*.info"):
+            try:
+                return json.loads(info_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
     return {}
 
 
