@@ -99,32 +99,36 @@ Goal: Reliable, isolated, per-app Wine environments with configurable Proton/Win
 Goal: A user selects a GOG offline installer (`.exe` or multi-part set) and exwin handles everything, resulting in a launchable library entry.
 
 ### 3.1 Installer Detection & Validation
-- [ ] Accept single `.exe` or multi-part GOG installers (`.exe` + `.bin` parts)
-- [ ] Parse GOG installer metadata (game title, version, language) from the installer binary (InnoSetup extraction via `innoextract`)
-- [ ] Validate file integrity (checksums if available)
+- [x] Accept single `.exe` GOG installers (multi-part `.bin` handled natively by innoextract)
+- [x] `probe()` — runs `innoextract --info`, parses title / GOG ID / setup version / languages
+- [x] Stable `app_id` derived from GOG game ID: `gog-<game_id>`
+- [ ] Checksum validation (GOG `.hashdb` file — M4)
 
 ### 3.2 Extraction / Installation
-- [ ] Use `innoextract` to extract GOG installer contents to a staging directory
-- [ ] Alternatively, run the GOG installer via Wine in a controlled prefix (for installers that require it)
-- [ ] Detect and relocate installed files to the app's prefix `drive_c/` directory
-- [ ] Record installed file manifest for clean uninstall
+- [x] `extract()` — runs `innoextract --extract`, streams output to progress callback
+- [x] Files extracted directly to `apps/<app-id>/` — no intermediate staging copy
+- [x] `goggame-<id>.info` and `goggame-<id>.hashdb` preserved in install dir for reference
+- [ ] Wine fallback for installers that require it (M4)
 
 ### 3.3 Post-Install Configuration
-- [ ] Auto-detect main executable (heuristics: GOG game info files, `*.exe` search, user confirmation fallback)
-- [ ] Apply any required winetricks verbs (user-configurable or from a community config database)
-- [ ] Create library entry with metadata (title, cover art from GOG CDN or local cache, description)
-- [ ] Fetch cover art / metadata from IGDB, GOG API (public), or allow manual override
+- [x] `find_primary_exe()` — reads `playTasks[].isPrimary` from `goggame-*.info`
+- [x] `guess_exe()` — heuristic fallback: skips `__redist/`, matches title to exe stem
+- [x] `find_cover_art()` — picks smallest `*_english.jpg` from `tmp/` (GOG portrait cover art)
+- [x] Cover art copied to `metadata/<app-id>/cover.jpg`
+- [x] Winetricks verbs applied post-extraction (user-entered in install dialog)
+- [x] Per-app `app.toml` written with arch + verb list
+- [ ] GOG API / IGDB metadata fetch (M4)
 
 ### 3.4 App Config Database (Community / Local)
-- [ ] Local config file per app (TOML or YAML): winetricks deps, env vars, launch args, known working Proton version
-- [ ] Optional: community-maintained compatibility database (similar to ProtonDB) bundled or fetched at runtime
-- [ ] User can override any field locally
+- [x] Per-app TOML at `apps/<app-id>/app.toml` (from M2) — winetricks deps, env vars, launch args
+- [ ] Community compatibility database (M4)
 
 ### 3.5 Uninstall
-- [ ] Remove app files (installed directory)
-- [ ] Delete Wine prefix
-- [ ] Remove library entry and metadata cache
-- [ ] Optionally retain user save data (detect and preserve common save locations)
+- [x] `delete_app()` removes DB entry
+- [x] `delete_prefix()` removes `prefixes/<app-id>/` tree
+- [x] `shutil.rmtree(install_path)` removes game files (called in `_uninstall_app`)
+- [ ] Metadata cache cleanup (M4 — currently left for user inspection)
+- [ ] Save game preservation heuristics (M4)
 
 ---
 

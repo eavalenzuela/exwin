@@ -19,6 +19,7 @@ from exwin.db.apps import delete_app, get_all_apps, update_last_launched  # noqa
 from exwin.db.runtimes import get_runtime  # noqa: E402
 from exwin.models import AppEntry  # noqa: E402
 from exwin.ui.app_detail_dialog import AppDetailDialog  # noqa: E402
+from exwin.ui.install_dialog import InstallDialog  # noqa: E402
 from exwin.ui.library_page import LibraryPage  # noqa: E402
 from exwin.ui.settings_page import SettingsPage  # noqa: E402
 
@@ -163,7 +164,16 @@ class ExwinWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _on_install_clicked(self, _btn: Gtk.Button) -> None:
-        self.show_toast("Install workflow coming in M3")
+        dialog = InstallDialog(
+            config=self._config,
+            runtimes=self._runtimes,
+            on_installed=self._on_app_installed,
+        )
+        dialog.present(self)
+
+    def _on_app_installed(self, app: AppEntry) -> None:
+        self.refresh_library()
+        self.show_toast(f'"{app.name}" added to library')
 
     # ------------------------------------------------------------------
     # App lifecycle
