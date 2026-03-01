@@ -52,6 +52,8 @@ class InstallDialog(Adw.Dialog):
         self.set_child(toolbar_view)
 
         self._header = Adw.HeaderBar()
+        self._dialog_title = Adw.WindowTitle(title="Install Game", subtitle="")
+        self._header.set_title_widget(self._dialog_title)
         toolbar_view.add_top_bar(self._header)
 
         self._stack = Gtk.Stack()
@@ -386,7 +388,7 @@ class InstallDialog(Adw.Dialog):
         self._show_probing()
 
     def _show_probing(self) -> None:
-        self._header.set_title("Reading installer…")
+        self._dialog_title.set_title("Reading installer…")
         self._stack.set_visible_child_name("installing")
         self._install_spinner.set_spinning(True)
         self._install_status_label.set_label("Reading installer…")
@@ -409,7 +411,7 @@ class InstallDialog(Adw.Dialog):
     def _on_probe_done(self, info) -> None:
         self._installer_type = "innosetup"
         self._install_spinner.set_spinning(False)
-        self._header.set_title(info.title)
+        self._dialog_title.set_title(info.title)
         self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
         self._stack.set_visible_child_name("confirm")
         self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
@@ -422,7 +424,7 @@ class InstallDialog(Adw.Dialog):
         self._installer_type = "generic"
         assert self._installer_path is not None
         self._install_spinner.set_spinning(False)
-        self._header.set_title(self._installer_path.stem)
+        self._dialog_title.set_title(self._installer_path.stem)
         self._generic_file_row.set_subtitle(self._installer_path.name)
         self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
         self._stack.set_visible_child_name("confirm_generic")
@@ -582,7 +584,7 @@ class InstallDialog(Adw.Dialog):
             self._wine_proc.terminate()
         self._stack.set_visible_child_name("welcome")
         self._installer_path = None
-        self._header.set_title("Install Game")
+        self._dialog_title.set_title("Install Game")
 
     # ------------------------------------------------------------------
     # Shared handlers
@@ -601,7 +603,7 @@ class InstallDialog(Adw.Dialog):
 
     def _on_retry_clicked(self, _btn: Gtk.Button) -> None:
         self._installer_path = None
-        self._header.set_title("Install Game")
+        self._dialog_title.set_title("Install Game")
         self._stack.set_visible_child_name("welcome")
 
     def _append_log(self, line: str) -> None:
