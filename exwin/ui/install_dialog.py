@@ -21,6 +21,7 @@ from exwin.backend.generic_installer import (  # noqa: E402
     scan_candidate_exes,
 )
 from exwin.backend.gog_installer import (  # noqa: E402
+    app_id_from_info,
     find_innoextract,
     find_rar_tool,
     find_sibling_parts,
@@ -54,8 +55,12 @@ class InstallDialog(Adw.Dialog):
         self._installer_type: str = "innosetup"  # "innosetup" | "generic"
         self._wine_proc = None  # running Wine installer subprocess
         self._generic_prefix_root: Path | None = None
+        self._generic_runtime: Runtime | None = None
+        self._generic_arch: str = "win64"
         self._generic_dlc_mode: bool = False
         self._generic_dlc_base_app: AppEntry | None = None
+        self._gog_wine_mode: bool = False  # True when GOG .exe runs interactively via Wine
+        self._gog_probe_info = None  # InstallerInfo from probe()
 
         # Load existing library entries for DLC base-game picker
         try:
@@ -194,6 +199,13 @@ class InstallDialog(Adw.Dialog):
             title="Install VKD3D-Proton", subtitle="DirectX 12 → Vulkan"
         )
         options_group.add(self._vkd3d_row)
+
+        self._gog_wine_row = Adw.SwitchRow(
+            title="Run via Wine Installer",
+            subtitle="Runs the GOG setup interactively — required for games that use registry-based CD keys",
+        )
+        self._gog_wine_row.connect("notify::active", self._on_gog_wine_toggled)
+        options_group.add(self._gog_wine_row)
 
         self._install_btn = Gtk.Button(label="Install")
         self._install_btn.add_css_class("suggested-action")
@@ -468,6 +480,7 @@ class InstallDialog(Adw.Dialog):
 
     def _on_probe_done(self, info) -> None:
         self._installer_type = "innosetup"
+        self._gog_probe_info = info
         self._install_spinner.set_spinning(False)
         self._dialog_title.set_title(info.title)
         self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
@@ -504,12 +517,40 @@ class InstallDialog(Adw.Dialog):
     # ------------------------------------------------------------------
 
     def _on_install_clicked(self, _btn: Gtk.Button) -> None:
+        if self._gog_wine_row.get_active():
+            self._start_gog_wine_install()
+            return
+
         self._stack.set_visible_child_name("installing")
         self._install_spinner.set_spinning(True)
         self._install_status_label.set_label("Installing…")
         self._log_buffer.set_text("")
 
         threading.Thread(target=self._install_thread, daemon=True).start()
+
+    def _start_gog_wine_install(self) -> None:
+        """Run the GOG .exe interactively via Wine, then show exe selection."""
+        assert self._installer_path is not None
+        assert self._gog_probe_info is not None
+
+        from exwin.backend.prefix import prefix_root
+
+        runtime = self._runtimes[self._runtime_row.get_selected()] if self._runtimes else None
+        arch = _ARCH_OPTIONS[self._arch_row.get_selected()]
+        app_id = app_id_from_info(self._gog_probe_info)
+        p_root = prefix_root(app_id, self._config)
+
+        self._generic_prefix_root = p_root
+        self._generic_runtime = runtime
+        self._generic_arch = arch
+        self._gog_wine_mode = True
+
+        self._stack.set_visible_child_name("wine_running")
+        threading.Thread(
+            target=self._wine_installer_thread,
+            args=(self._installer_path, p_root, runtime, arch),
+            daemon=True,
+        ).start()
 
     def _install_thread(self) -> None:
         assert self._installer_path is not None
@@ -644,8 +685,12 @@ class InstallDialog(Adw.Dialog):
         assert self._installer_path is not None
         assert self._generic_prefix_root is not None
 
-        app_name = self._installer_path.stem
-        verbs_text = self._generic_winetricks_row.get_text().strip()
+        if self._gog_wine_mode and self._gog_probe_info is not None:
+            app_name = self._gog_probe_info.title
+            verbs_text = self._winetricks_row.get_text().strip()
+        else:
+            app_name = self._installer_path.stem
+            verbs_text = self._generic_winetricks_row.get_text().strip()
         verbs = verbs_text.split() if verbs_text else []
 
         self._stack.set_visible_child_name("installing")
@@ -661,6 +706,13 @@ class InstallDialog(Adw.Dialog):
 
     def _finalize_thread(self, app_name: str, exe_abs: Path, verbs: list[str]) -> None:
         assert self._generic_prefix_root is not None
+
+        app_id_override = None
+        source_override = "manual"
+        if self._gog_wine_mode and self._gog_probe_info is not None:
+            app_id_override = app_id_from_info(self._gog_probe_info)
+            source_override = "gog"
+
         try:
             app = finalize_generic_install(
                 app_name=app_name,
@@ -671,6 +723,8 @@ class InstallDialog(Adw.Dialog):
                 arch=self._generic_arch,
                 winetricks_verbs=verbs,
                 on_progress=lambda msg: GLib.idle_add(self._append_log, msg),
+                app_id_override=app_id_override,
+                source_override=source_override,
             )
             GLib.idle_add(self._on_install_done, app)
         except Exception as exc:
@@ -679,6 +733,7 @@ class InstallDialog(Adw.Dialog):
     def _on_cancel_wine(self, _btn: Gtk.Button) -> None:
         if self._wine_proc is not None:
             self._wine_proc.terminate()
+        self._gog_wine_mode = False
         self._stack.set_visible_child_name("welcome")
         self._installer_path = None
         self._dialog_title.set_title("Install Game")
@@ -686,6 +741,14 @@ class InstallDialog(Adw.Dialog):
     # ------------------------------------------------------------------
     # Shared handlers
     # ------------------------------------------------------------------
+
+    def _on_gog_wine_toggled(self, switch_row: Adw.SwitchRow, _pspec) -> None:
+        is_wine = switch_row.get_active()
+        self._install_btn.set_label("Run Installer" if is_wine else "Install")
+        # DLC mode and Wine mode are mutually exclusive
+        self._dlc_switch_row.set_sensitive(not is_wine and bool(self._base_games))
+        if is_wine and self._dlc_switch_row.get_active():
+            self._dlc_switch_row.set_active(False)
 
     def _on_dlc_toggled(self, switch_row: Adw.SwitchRow, _pspec) -> None:
         self._base_game_row.set_visible(switch_row.get_active())
@@ -711,6 +774,7 @@ class InstallDialog(Adw.Dialog):
 
     def _on_retry_clicked(self, _btn: Gtk.Button) -> None:
         self._installer_path = None
+        self._gog_wine_mode = False
         self._dialog_title.set_title("Install Game")
         self._stack.set_visible_child_name("welcome")
 

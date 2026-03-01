@@ -112,6 +112,8 @@ def finalize_generic_install(
     arch: str = "win64",
     winetricks_verbs: list[str] | None = None,
     on_progress: Callable[[str], None] | None = None,
+    app_id_override: str | None = None,
+    source_override: str = "manual",
 ) -> AppEntry:
     """Persist a generic Wine-installed app to the library.
 
@@ -123,6 +125,8 @@ def finalize_generic_install(
         runtime:   The runtime used.
         arch:      Wine architecture.
         winetricks_verbs: Optional list of verbs to run post-install.
+        app_id_override: If set, use this app ID instead of auto-generating one.
+        source_override: Library source tag (default ``"manual"``).
 
     Returns:
         The newly created :class:`AppEntry`.
@@ -132,7 +136,7 @@ def finalize_generic_install(
         if on_progress:
             on_progress(msg)
 
-    app_id = _slugify_app_id(app_name)
+    app_id = app_id_override if app_id_override else _slugify_app_id(app_name)
 
     # Apply winetricks if requested
     verbs = winetricks_verbs or []
@@ -162,7 +166,7 @@ def finalize_generic_install(
     app = AppEntry(
         app_id=app_id,
         name=app_name,
-        source="manual",
+        source=source_override,
         install_path=str(p_root),
         prefix_path=str(p_root),
         exe_path=exe_rel,
