@@ -16,9 +16,9 @@ from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
 
 _COLOR_SCHEMES = [
-    ("System", Adw.ColorScheme.DEFAULT),
-    ("Light", Adw.ColorScheme.FORCE_LIGHT),
-    ("Dark", Adw.ColorScheme.FORCE_DARK),
+    ("System", Adw.ColorScheme.DEFAULT, "system"),
+    ("Light", Adw.ColorScheme.FORCE_LIGHT, "light"),
+    ("Dark", Adw.ColorScheme.FORCE_DARK, "dark"),
 ]
 
 
@@ -54,8 +54,10 @@ class SettingsPage(Adw.PreferencesPage):
 
         # Color scheme
         scheme_row = Adw.ComboRow(title="Color Scheme")
-        scheme_row.set_model(Gtk.StringList.new([label for label, _ in _COLOR_SCHEMES]))
-        scheme_row.set_selected(0)
+        scheme_row.set_model(Gtk.StringList.new([label for label, _, _ in _COLOR_SCHEMES]))
+        saved = config.color_scheme
+        initial = next((i for i, (_, _, key) in enumerate(_COLOR_SCHEMES) if key == saved), 0)
+        scheme_row.set_selected(initial)
         scheme_row.connect("notify::selected", self._on_color_scheme_changed)
         general.add(scheme_row)
 
@@ -109,8 +111,10 @@ class SettingsPage(Adw.PreferencesPage):
         subprocess.Popen(["xdg-open", str(self._config.data_dir)])
 
     def _on_color_scheme_changed(self, row: Adw.ComboRow, _param) -> None:
-        _, scheme = _COLOR_SCHEMES[row.get_selected()]
+        _, scheme, key = _COLOR_SCHEMES[row.get_selected()]
         Adw.StyleManager.get_default().set_color_scheme(scheme)
+        self._config.color_scheme = key
+        self._config.save()
 
     def _on_download_ge_clicked(self, _btn: Gtk.Button) -> None:
         from exwin.ui.proton_ge_dialog import ProtonGEDialog

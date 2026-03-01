@@ -16,6 +16,7 @@ _CONFIG_FILENAME = "config.toml"
 class Config:
     data_dir: Path = field(default_factory=lambda: _DEFAULT_DATA_DIR)
     default_runtime: str = ""  # empty = auto-detect
+    color_scheme: str = "system"  # "system" | "light" | "dark"
 
     # ------------------------------------------------------------------ #
     # Derived paths (not stored; computed from data_dir)
@@ -69,6 +70,7 @@ class Config:
         cfg = cls(
             data_dir=Path(raw.get("data_dir", _DEFAULT_DATA_DIR)),
             default_runtime=raw.get("default_runtime", ""),
+            color_scheme=raw.get("color_scheme", "system"),
         )
         cfg._ensure_dirs()
         return cfg
@@ -79,6 +81,7 @@ class Config:
         data = {
             "data_dir": str(self.data_dir),
             "default_runtime": self.default_runtime,
+            "color_scheme": self.color_scheme,
         }
         with open(self.config_path, "wb") as f:
             tomli_w.dump(data, f)
