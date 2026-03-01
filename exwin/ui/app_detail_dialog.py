@@ -1,0 +1,146 @@
+"""App detail dialog — shown when a library card is activated."""
+
+from __future__ import annotations
+
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
+
+import gi
+
+gi.require_version("Adw", "1")
+gi.require_version("Gtk", "4.0")
+
+from gi.repository import Adw, Gtk  # noqa: E402
+
+from exwin.models import AppEntry  # noqa: E402
+
+
+class AppDetailDialog(Adw.Dialog):
+    """Modal dialog showing full info for a single app with action buttons."""
+
+    def __init__(
+        self,
+        app: AppEntry,
+        on_launch: Callable[[AppEntry], None],
+        on_uninstall: Callable[[AppEntry], None],
+        **kwargs,
+    ) -> None:
+        super().__init__(title=app.name, content_width=440, **kwargs)
+        self._app = app
+        self._on_launch = on_launch
+        self._on_uninstall = on_uninstall
+
+        toolbar_view = Adw.ToolbarView()
+        self.set_child(toolbar_view)
+
+        header = Adw.HeaderBar()
+        toolbar_view.add_top_bar(header)
+
+        scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        toolbar_view.set_content(scroll)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content.set_margin_top(20)
+        content.set_margin_bottom(20)
+        content.set_margin_start(20)
+        content.set_margin_end(20)
+        scroll.set_child(content)
+
+        # Cover art
+        cover = Gtk.Image()
+        cover.set_size_request(160, 220)
+        cover.set_halign(Gtk.Align.CENTER)
+        if app.cover_art_path and Path(app.cover_art_path).exists():
+            cover.set_from_file(app.cover_art_path)
+        else:
+            cover.set_from_icon_name("applications-games-symbolic")
+            cover.set_pixel_size(96)
+        content.append(cover)
+
+        # Name
+        name_label = Gtk.Label(label=app.name)
+        name_label.add_css_class("title-1")
+        name_label.set_wrap(True)
+        name_label.set_halign(Gtk.Align.CENTER)
+        content.append(name_label)
+
+        # Source badge
+        source_label = Gtk.Label(label=app.source.upper())
+        source_label.add_css_class("caption")
+        source_label.add_css_class("dim-label")
+        source_label.set_halign(Gtk.Align.CENTER)
+        content.append(source_label)
+
+        # Description
+        if app.description:
+            desc = Gtk.Label(label=app.description)
+            desc.set_wrap(True)
+            desc.set_halign(Gtk.Align.START)
+            desc.add_css_class("body")
+            content.append(desc)
+
+        # Info rows (paths, dates)
+        info_group = Adw.PreferencesGroup()
+        content.append(info_group)
+
+        if app.install_path:
+            info_group.add(_info_row("Install Path", app.install_path, copyable=True))
+        if app.prefix_path:
+            info_group.add(_info_row("Wine Prefix", app.prefix_path, copyable=True))
+        if app.install_date:
+            info_group.add(_info_row("Installed", app.install_date[:10]))
+        if app.last_launched:
+            info_group.add(_info_row("Last Launched", app.last_launched[:10]))
+
+        # Action buttons
+        btn_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.CENTER
+        )
+        content.append(btn_box)
+
+        open_btn = Gtk.Button(label="Open Prefix")
+        open_btn.add_css_class("flat")
+        open_btn.set_sensitive(bool(app.prefix_path))
+        open_btn.connect("clicked", self._on_open_prefix)
+        btn_box.append(open_btn)
+
+        launch_btn = Gtk.Button(label="Launch")
+        launch_btn.add_css_class("suggested-action")
+        launch_btn.add_css_class("pill")
+        launch_btn.connect("clicked", self._on_launch_clicked)
+        btn_box.append(launch_btn)
+
+        uninstall_btn = Gtk.Button(label="Uninstall")
+        uninstall_btn.add_css_class("destructive-action")
+        uninstall_btn.connect("clicked", self._on_uninstall_clicked)
+        content.append(uninstall_btn)
+        uninstall_btn.set_halign(Gtk.Align.CENTER)
+
+    # ------------------------------------------------------------------
+    # Button handlers
+    # ------------------------------------------------------------------
+
+    def _on_launch_clicked(self, _btn: Gtk.Button) -> None:
+        self._on_launch(self._app)
+        self.close()
+
+    def _on_uninstall_clicked(self, _btn: Gtk.Button) -> None:
+        self._on_uninstall(self._app)
+        self.close()
+
+    def _on_open_prefix(self, _btn: Gtk.Button) -> None:
+        if self._app.prefix_path:
+            subprocess.Popen(["xdg-open", self._app.prefix_path])
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+
+def _info_row(title: str, value: str, *, copyable: bool = False) -> Adw.ActionRow:
+    row = Adw.ActionRow(title=title, subtitle=value)
+    row.set_subtitle_selectable(copyable)
+    return row

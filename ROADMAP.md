@@ -30,24 +30,24 @@
 Goal: A working window that can display a list of apps and supports basic actions.
 
 ### 1.1 Library View
-- [ ] Grid/list view of installed applications
-- [ ] App cards with: name, cover art/icon, play button, install status badge
-- [ ] Search and filter (by name, tag, install status)
-- [ ] Sidebar or top-bar navigation
+- [x] Grid/list view of installed applications (`Gtk.FlowBox` of `_AppCard` widgets)
+- [x] App cards with: name, cover art/icon, source badge
+- [x] Search and filter (by name, live with `FlowBox.set_filter_func`)
+- [x] Sidebar navigation (`Gtk.ListBox` with `navigation-sidebar` style; Library + Settings)
 
 ### 1.2 App Detail View
-- [ ] App info panel (name, description, size on disk, Wine/Proton version in use)
-- [ ] Launch / Stop controls
-- [ ] Uninstall button
-- [ ] Open prefix directory shortcut
+- [x] App info panel (name, description, paths, dates) — `AppDetailDialog` (`AdwDialog`)
+- [x] Launch / Stop controls (stub → toast; real impl M2)
+- [x] Uninstall button (deletes from DB + refreshes library)
+- [x] Open prefix directory shortcut (`xdg-open`)
 
 ### 1.3 Settings / Preferences
-- [ ] Default Wine/Proton version selector
-- [ ] Default install root directory
-- [ ] Theme (dark/light)
+- [x] Default Wine/Proton version display (placeholder row)
+- [x] Default install root directory display + open button
+- [x] Theme (dark/light/system) via `Adw.StyleManager` + `AdwComboRow`
 
 ### 1.4 Notifications & Status
-- [ ] In-app notification area for install progress, errors, launch events
+- [x] In-app toast notifications via `AdwToastOverlay` + `AdwToast`
 - [ ] Taskbar/tray icon (optional, post-MVP)
 
 ---

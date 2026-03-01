@@ -26,5 +26,5 @@ class ExwinApp(Adw.Application):
     def do_activate(self) -> None:
         win = self.props.active_window
         if not win:
-            win = ExwinWindow(application=self)
+            win = ExwinWindow(config=self.config, application=self)
         win.present()
