@@ -18,6 +18,7 @@ from exwin.backend.gog_installer import (
     guess_exe,
     parse_game_info,
     probe,
+    validate_checksums,
 )
 from exwin.backend.gog_metadata import apply_metadata
 from exwin.backend.prefix import create_prefix, prefix_root
@@ -56,6 +57,9 @@ def install_gog(
     def _log(msg: str) -> None:
         if on_progress:
             on_progress(msg)
+
+    # ── 0. Verify checksums (if .hashdb present) ─────────────────────────
+    validate_checksums(installer_path, on_progress=_log)
 
     # ── 1. Probe ─────────────────────────────────────────────────────────
     _log(f"Reading installer: {installer_path.name}")

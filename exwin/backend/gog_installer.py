@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -181,6 +182,51 @@ def find_sibling_parts(exe_path: Path) -> list[Path]:
     stem = exe_path.stem
     parent = exe_path.parent
     return sorted(parent.glob(f"{stem}*.bin"))
+
+
+def find_hashdb(installer_path: Path) -> Path | None:
+    """Return the .hashdb sidecar path if it exists alongside the installer."""
+    candidate = installer_path.with_suffix(".hashdb")
+    return candidate if candidate.exists() else None
+
+
+def validate_checksums(
+    installer_path: Path,
+    on_progress: Callable[[str], None] | None = None,
+) -> None:
+    """Verify MD5 of each installer part listed in the .hashdb sidecar.
+
+    No-op if .hashdb not found. Raises RuntimeError on mismatch or missing file.
+    """
+    hashdb = find_hashdb(installer_path)
+    if hashdb is None:
+        return
+
+    entries: dict[str, str] = {}
+    for line in hashdb.read_text(encoding="utf-8").splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2:
+            entries[parts[1].strip()] = parts[0].lower()
+
+    parent = installer_path.parent
+    for filename, expected in entries.items():
+        path = parent / filename
+        if not path.exists():
+            raise RuntimeError(f"Missing installer file: {filename}")
+        if on_progress:
+            on_progress(f"Verifying {filename}…")
+        if _md5_file(path) != expected:
+            raise RuntimeError(
+                f"Checksum mismatch for {filename} — file may be corrupt or incomplete"
+            )
+
+
+def _md5_file(path: Path) -> str:
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def app_id_from_info(info: InstallerInfo) -> str:

@@ -241,16 +241,18 @@ class ExwinWindow(Adw.ApplicationWindow):
         self.refresh_library()
 
     def _uninstall_app(self, app: AppEntry, delete_files: bool) -> None:
-        if delete_files:
-            import shutil
-            from pathlib import Path
+        import shutil
+        from pathlib import Path
 
+        if delete_files:
             install = Path(app.install_path) if app.install_path else None
             prefix = Path(app.prefix_path) if app.prefix_path else None
             if install and install.exists():
                 shutil.rmtree(install, ignore_errors=True)
             if prefix and prefix != install and prefix.exists():
                 shutil.rmtree(prefix, ignore_errors=True)
+        shutil.rmtree(self._config.metadata_dir / app.app_id, ignore_errors=True)
+        shutil.rmtree(self._config.apps_dir / app.app_id, ignore_errors=True)
         delete_app(app.app_id)
         self.refresh_library()
         self.show_toast(f'"{app.name}" uninstalled')

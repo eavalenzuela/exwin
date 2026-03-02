@@ -48,7 +48,7 @@ Goal: A working window that can display a list of apps and supports basic action
 
 ### 1.4 Notifications & Status
 - [x] In-app toast notifications via `AdwToastOverlay` + `AdwToast`
-- [ ] Taskbar/tray icon (optional, post-MVP)
+- [x] Taskbar/tray icon (via StatusNotifierItem/DBus — no extra C library)
 
 ---
 
@@ -102,7 +102,7 @@ Goal: A user selects a GOG offline installer (`.exe` or multi-part set) and exwi
 - [x] Accept single `.exe` GOG installers (multi-part `.bin` handled natively by innoextract)
 - [x] `probe()` — runs `innoextract --info`, parses title / GOG ID / setup version / languages
 - [x] Stable `app_id` derived from GOG game ID: `gog-<game_id>`
-- [ ] Checksum validation (GOG `.hashdb` file — M4)
+- [x] Checksum validation (GOG `.hashdb` sidecar — MD5 per-part, step 0 of install)
 
 ### 3.2 Extraction / Installation
 - [x] `extract()` — runs `innoextract --extract`, streams output to progress callback
@@ -127,7 +127,7 @@ Goal: A user selects a GOG offline installer (`.exe` or multi-part set) and exwi
 - [x] `delete_app()` removes DB entry
 - [x] `delete_prefix()` removes `prefixes/<app-id>/` tree
 - [x] `shutil.rmtree(install_path)` removes game files (called in `_uninstall_app`)
-- [ ] Metadata cache cleanup (M4 — currently left for user inspection)
+- [x] Metadata cache cleanup (cover art + app config dir removed on uninstall)
 - [ ] Save game preservation heuristics (M4)
 
 ---
@@ -144,7 +144,7 @@ Goal: A user selects a GOG offline installer (`.exe` or multi-part set) and exwi
 - [ ] Controller support / gamepad navigation in GUI
 - [x] Flatpak packaging (v0.1.0)
 - [ ] Plugin/hook system for custom pre/post install scripts
-- [ ] Automatic save game backup
+- [x] Automatic save game backup (M8 — backup/restore buttons in AppDetailDialog + CLI)
 
 ---
 

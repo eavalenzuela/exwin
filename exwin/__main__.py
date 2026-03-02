@@ -143,6 +143,11 @@ def _cmd_remove(app_id: str, delete_files: bool) -> None:
             shutil.rmtree(prefix, ignore_errors=True)
             print(f"Deleted: {prefix}")
 
+    shutil.rmtree(config.metadata_dir / app_id, ignore_errors=True)
+    print(f"Deleted metadata: {config.metadata_dir / app_id}")
+    shutil.rmtree(config.apps_dir / app_id, ignore_errors=True)
+    print(f"Deleted config: {config.apps_dir / app_id}")
+
     delete_app(app_id)
     print(f'"{app.name}" removed from library.')
 

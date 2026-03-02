@@ -5,11 +5,12 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gio  # noqa: E402
+from gi.repository import Adw, Gio, GLib  # noqa: E402
 
 from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.launcher import Launcher  # noqa: E402
 from exwin.backend.runtime import scan_runtimes  # noqa: E402
+from exwin.backend.tray import TrayIcon  # noqa: E402
 from exwin.db.runtimes import sync_runtimes  # noqa: E402
 from exwin.db.schema import init_db  # noqa: E402
 from exwin.window import ExwinWindow  # noqa: E402
@@ -41,6 +42,7 @@ class ExwinApp(Adw.Application):
         # The result (with db_ids populated) is kept for the window to use.
         self.runtimes = sync_runtimes(scan_runtimes())
         self.launcher = Launcher(self.config)
+        self._tray: TrayIcon | None = None
 
     def do_activate(self) -> None:
         win = self.props.active_window
@@ -51,4 +53,20 @@ class ExwinApp(Adw.Application):
                 launcher=self.launcher,
                 application=self,
             )
+            self._tray = TrayIcon(
+                icon_name="io.github.exwin",
+                title="exwin",
+                on_activate=lambda: GLib.idle_add(win.present),
+                on_quit=lambda: GLib.idle_add(self.quit),
+            )
+            self._tray.start()  # no-op if no SNI watcher present
+            self.hold()  # keep GLib loop alive when window is hidden
+            win.connect("close-request", self._on_close_request)
         win.present()
+
+    def _on_close_request(self, win) -> bool:  # noqa: ANN001
+        if self._tray is not None and self._tray.running:
+            win.set_visible(False)
+            return True  # suppress default destroy
+        self.release()
+        return False  # allow normal close + GLib loop exit
