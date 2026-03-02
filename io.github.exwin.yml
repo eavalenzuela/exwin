@@ -38,3 +38,4 @@ modules:
     sources:
       - type: git
         path: .
+        branch: main
