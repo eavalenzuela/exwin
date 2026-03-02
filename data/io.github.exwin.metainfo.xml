@@ -34,6 +34,21 @@
   <launchable type="desktop-id">io.github.exwin.desktop</launchable>
 
   <releases>
+    <release version="0.2.0" date="2026-03-01">
+      <description>
+        <p>Feature update adding system tray icon, GOG checksum validation, play time tracking, save file backup, CLI interface, GPU selection, global storage root, and metadata cleanup on uninstall.</p>
+        <ul>
+          <li>System tray icon via StatusNotifierItem (DBus) — close to tray, restore on click</li>
+          <li>GOG installer checksum validation from .hashdb sidecar before extraction</li>
+          <li>Play time tracking per game, displayed on library cards and detail view</li>
+          <li>Save file backup and restore with per-app save path configuration</li>
+          <li>CLI subcommands: list, launch, remove, migrate, backup-saves, restore-saves</li>
+          <li>GPU selection per app (DRI_PRIME / DXVK_FILTER_DEVICE_NAME)</li>
+          <li>Global storage root to redirect game files and prefixes to an external drive</li>
+          <li>Metadata and config directory cleanup on uninstall</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-03-01">
       <description>
         <p>Initial release with full GOG offline installer automation, Proton/Wine backend, and GTK4/libadwaita UI.</p>
