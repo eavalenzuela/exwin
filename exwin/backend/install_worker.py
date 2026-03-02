@@ -63,7 +63,7 @@ def install_gog(
     _log(f'Found: "{info.title}" (GOG ID: {info.game_id or "unknown"})')
 
     app_id = app_id_from_info(info)
-    install_dir = config.apps_dir / app_id
+    install_dir = config.installs_dir / app_id
 
     if install_dir.exists():
         raise RuntimeError(

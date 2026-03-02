@@ -115,21 +115,26 @@ class TestStorageRoot:
     def test_storage_root_default_is_none(self, tmp_config: Config) -> None:
         assert tmp_config.storage_root is None
 
+    def test_apps_dir_always_under_data_dir(self, tmp_config: Config, tmp_path: Path) -> None:
+        """apps_dir (metadata) never follows storage_root."""
+        tmp_config.storage_root = tmp_path / "external"
+        assert tmp_config.apps_dir == tmp_config.data_dir / "apps"
+
     def test_prefixes_dir_uses_data_dir_when_storage_root_none(self, tmp_config: Config) -> None:
         assert tmp_config.prefixes_dir == tmp_config.data_dir / "prefixes"
 
-    def test_apps_dir_uses_data_dir_when_storage_root_none(self, tmp_config: Config) -> None:
-        assert tmp_config.apps_dir == tmp_config.data_dir / "apps"
+    def test_installs_dir_uses_data_dir_when_storage_root_none(self, tmp_config: Config) -> None:
+        assert tmp_config.installs_dir == tmp_config.data_dir / "apps"
 
     def test_prefixes_dir_uses_storage_root_when_set(self, tmp_config: Config, tmp_path: Path) -> None:
         custom = tmp_path / "external"
         tmp_config.storage_root = custom
         assert tmp_config.prefixes_dir == custom / "prefixes"
 
-    def test_apps_dir_uses_storage_root_when_set(self, tmp_config: Config, tmp_path: Path) -> None:
+    def test_installs_dir_uses_storage_root_when_set(self, tmp_config: Config, tmp_path: Path) -> None:
         custom = tmp_path / "external"
         tmp_config.storage_root = custom
-        assert tmp_config.apps_dir == custom / "apps"
+        assert tmp_config.installs_dir == custom / "apps"
 
     def test_storage_root_roundtrip(self, tmp_config: Config, tmp_path: Path) -> None:
         custom = tmp_path / "external"

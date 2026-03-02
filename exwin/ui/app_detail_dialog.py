@@ -32,6 +32,7 @@ class AppDetailDialog(Adw.Dialog):
         on_stop: Callable[[AppEntry], None],
         on_uninstall: Callable[[AppEntry], None],
         on_settings_saved: Callable[[str, AppConfig], None] | None = None,
+        on_paths_changed: Callable[[AppEntry], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(title=app.name, content_width=440, content_height=560, **kwargs)
@@ -42,6 +43,8 @@ class AppDetailDialog(Adw.Dialog):
         self._on_stop = on_stop
         self._on_uninstall = on_uninstall
         self._on_settings_saved = on_settings_saved
+        self._on_paths_changed = on_paths_changed
+        self._migrate_btn: Gtk.Button | None = None
 
         toolbar_view = Adw.ToolbarView()
         self.set_child(toolbar_view)
@@ -143,6 +146,18 @@ class AppDetailDialog(Adw.Dialog):
         shortcut_btn.connect("clicked", self._on_make_shortcut)
         btn_box.append(shortcut_btn)
 
+        if config.storage_root is not None and app.install_path:
+            target = config.installs_dir / app.app_id
+            if Path(app.install_path).resolve() != target.resolve():
+                migrate_btn = Gtk.Button(label="Move to Storage")
+                migrate_btn.add_css_class("flat")
+                migrate_btn.set_tooltip_text(
+                    f"Move game files and Wine prefix to {config.storage_root}"
+                )
+                migrate_btn.connect("clicked", self._on_migrate_clicked)
+                btn_box.append(migrate_btn)
+                self._migrate_btn = migrate_btn
+
         if is_running:
             primary_btn = Gtk.Button(label="Stop")
             primary_btn.add_css_class("destructive-action")
@@ -198,6 +213,56 @@ class AppDetailDialog(Adw.Dialog):
     def _on_open_prefix(self, _btn: Gtk.Button) -> None:
         if self._app.prefix_path:
             subprocess.Popen(["xdg-open", self._app.prefix_path])
+
+    def _on_migrate_clicked(self, _btn: Gtk.Button) -> None:
+        dialog = Adw.AlertDialog(
+            heading="Move Game Data?",
+            body=f"Move game files and Wine prefix to:\n{self._config.storage_root}\n\n"
+            "This may take a while for large games. The app must not be running.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("move", "Move")
+        dialog.set_response_appearance("move", Adw.ResponseAppearance.SUGGESTED)
+        dialog.connect("response", self._on_migrate_confirmed)
+        dialog.present(self)
+
+    def _on_migrate_confirmed(self, _dialog: Adw.AlertDialog, response: str) -> None:
+        if response != "move":
+            return
+        if self._migrate_btn:
+            self._migrate_btn.set_label("Moving…")
+            self._migrate_btn.set_sensitive(False)
+        import threading
+
+        threading.Thread(target=self._migrate_thread, daemon=True).start()
+
+    def _migrate_thread(self) -> None:
+        from gi.repository import GLib
+
+        from exwin.backend.migrate import move_game_data
+
+        try:
+            new_app = move_game_data(self._app, self._config)
+            GLib.idle_add(self._on_migrate_done, new_app)
+        except Exception as exc:
+            GLib.idle_add(self._on_migrate_error, str(exc))
+
+    def _on_migrate_done(self, new_app: AppEntry) -> None:
+        self._app = new_app
+        if self._on_paths_changed:
+            self._on_paths_changed(new_app)
+        root = self.get_root()
+        if hasattr(root, "show_toast"):
+            root.show_toast(f'"{new_app.name}" moved to storage successfully')
+        self.close()
+
+    def _on_migrate_error(self, msg: str) -> None:
+        if self._migrate_btn:
+            self._migrate_btn.set_label("Move to Storage")
+            self._migrate_btn.set_sensitive(True)
+        root = self.get_root()
+        if hasattr(root, "show_toast"):
+            root.show_toast(f"Migration failed: {msg}")
 
     def _on_make_shortcut(self, _btn: Gtk.Button) -> None:
         from exwin.backend.desktop_shortcut import create_shortcut

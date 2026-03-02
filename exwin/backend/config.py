@@ -42,14 +42,21 @@ class Config:
         return self.data_dir / "library.db"
 
     @property
+    def installs_dir(self) -> Path:
+        """Where game files are extracted/installed. Follows storage_root when set."""
+        base = self.storage_root if self.storage_root is not None else self.data_dir
+        return base / "apps"
+
+    @property
     def prefixes_dir(self) -> Path:
+        """Where Wine prefixes live. Follows storage_root when set."""
         base = self.storage_root if self.storage_root is not None else self.data_dir
         return base / "prefixes"
 
     @property
     def apps_dir(self) -> Path:
-        base = self.storage_root if self.storage_root is not None else self.data_dir
-        return base / "apps"
+        """Where per-app metadata (app.toml) lives. Always under data_dir."""
+        return self.data_dir / "apps"
 
     @property
     def runtimes_dir(self) -> Path:
@@ -110,12 +117,18 @@ class Config:
             tomli_w.dump(data, f)
 
     def _ensure_dirs(self) -> None:
+        # Dirs that must always exist (under data_dir)
         for d in (
             self.data_dir,
-            self.prefixes_dir,
             self.apps_dir,
             self.runtimes_dir,
             self.metadata_dir,
             self.logs_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)
+        # Storage-root dirs may be on an external drive; skip gracefully if unavailable
+        for d in (self.installs_dir, self.prefixes_dir):
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass

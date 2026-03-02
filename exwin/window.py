@@ -167,6 +167,7 @@ class ExwinWindow(Adw.ApplicationWindow):
             on_stop=self._stop_app,
             on_uninstall=self._uninstall_app,
             on_settings_saved=self._on_app_config_saved,
+            on_paths_changed=self._on_app_paths_changed,
         )
         dialog.present(self)
 
@@ -185,6 +186,9 @@ class ExwinWindow(Adw.ApplicationWindow):
     def _on_app_config_saved(self, app_id: str, app_config) -> None:  # noqa: ANN001
         self.refresh_library()
         self.show_toast("Settings saved")
+
+    def _on_app_paths_changed(self, app: AppEntry) -> None:
+        self.refresh_library()
 
     def _on_runtimes_changed(self) -> None:
         from exwin.backend.runtime import scan_runtimes
