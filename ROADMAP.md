@@ -142,7 +142,7 @@ Goal: A user selects a GOG offline installer (`.exe` or multi-part set) and exwi
 - [x] App config editor UI (AppSettingsDialog: exe, arch, env vars, DLL overrides, launch opts)
 - [ ] Import existing Lutris / Heroic / bottles configurations
 - [ ] Controller support / gamepad navigation in GUI
-- [ ] Flatpak / AppImage packaging
+- [x] Flatpak packaging (v0.1.0)
 - [ ] Plugin/hook system for custom pre/post install scripts
 - [ ] Automatic save game backup
 

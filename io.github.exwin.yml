@@ -1,0 +1,40 @@
+app-id: io.github.exwin
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: exwin
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=network              # GOG metadata, Proton-GE downloads
+  - --device=dri                 # GPU access
+  - --filesystem=home            # game files, Steam/Proton in ~/.steam, prefixes, ~/.local/bin
+  - --filesystem=host-os         # reach system tools at /run/host/usr/bin (wine, innoextract)
+  - --filesystem=xdg-data/applications:create  # write desktop shortcuts
+  - --env=PATH=/app/bin:/usr/bin:/run/host/usr/bin:/run/host/usr/local/bin
+
+modules:
+  - name: python3-tomli-w
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --find-links=. --prefix=/app tomli_w-1.2.0-py3-none-any.whl
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/c7/18/c86eb8e0202e32dd3df50d43d7ff9854f8e0603945ff398974c1d91ac1ef/tomli_w-1.2.0-py3-none-any.whl
+        sha256: 188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90
+
+  - name: exwin
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-build-isolation --prefix=/app .
+      - install -Dm644 data/io.github.exwin.desktop
+            /app/share/applications/io.github.exwin.desktop
+      - install -Dm644 data/io.github.exwin.metainfo.xml
+            /app/share/metainfo/io.github.exwin.metainfo.xml
+      - install -Dm644 data/icons/hicolor/scalable/apps/io.github.exwin.svg
+            /app/share/icons/hicolor/scalable/apps/io.github.exwin.svg
+    sources:
+      - type: dir
+        path: .

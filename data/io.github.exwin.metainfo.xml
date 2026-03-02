@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.exwin</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>exwin</name>
+  <summary>Offline Windows game manager for Linux</summary>
+
+  <description>
+    <p>
+      exwin is an offline-first Windows software and game manager for Linux.
+      It provides a Steam-like GUI experience for managing Windows applications
+      via Proton and Wine, with first-class support for GOG offline installers.
+    </p>
+    <ul>
+      <li>Install GOG offline installers automatically via innoextract</li>
+      <li>Per-app Proton/Wine configuration with prefix isolation</li>
+      <li>DXVK and VKD3D-Proton auto-install into Wine prefixes</li>
+      <li>Proton-GE download and management from GitHub releases</li>
+      <li>Winetricks integration with per-app verb lists</li>
+      <li>Save file backup and restore</li>
+      <li>Play time tracking</li>
+      <li>Desktop shortcut creation</li>
+      <li>Headless launch mode for desktop shortcuts</li>
+    </ul>
+  </description>
+
+  <url type="homepage">https://github.com/eavalenzuela/exwin</url>
+
+  <developer id="io.github.eavalenzuela">
+    <name>eavalenzuela</name>
+  </developer>
+
+  <launchable type="desktop-id">io.github.exwin.desktop</launchable>
+
+  <releases>
+    <release version="0.1.0" date="2026-03-01">
+      <description>
+        <p>Initial release with full GOG offline installer automation, Proton/Wine backend, and GTK4/libadwaita UI.</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1"/>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+</component>

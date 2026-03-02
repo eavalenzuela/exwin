@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=exwin
+Comment=Offline Windows game manager for Linux
+Exec=exwin
+Icon=io.github.exwin
+Type=Application
+Categories=Game;
+Keywords=wine;proton;gog;games;launcher;
+StartupWMClass=exwin
