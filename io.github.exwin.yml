@@ -36,5 +36,5 @@ modules:
       - install -Dm644 data/icons/hicolor/scalable/apps/io.github.exwin.svg
             /app/share/icons/hicolor/scalable/apps/io.github.exwin.svg
     sources:
-      - type: dir
+      - type: git
         path: .
