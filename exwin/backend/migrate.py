@@ -45,8 +45,7 @@ def move_game_data(
     if old_install and old_install.resolve() != new_install.resolve():
         if new_install.exists():
             raise RuntimeError(
-                f"Target already exists: {new_install}\n"
-                "Remove it manually before migrating."
+                f"Target already exists: {new_install}\nRemove it manually before migrating."
             )
         _log(f"Moving game files → {new_install} …")
         new_install.parent.mkdir(parents=True, exist_ok=True)
@@ -60,7 +59,9 @@ def move_game_data(
     # ── Move Wine prefix ─────────────────────────────────────────────────
     # For generic installs, prefix_path == install_path (same dir, already moved).
     # For GOG installs, prefix lives in a separate directory.
-    prefix_was_install = old_prefix and old_install and old_prefix.resolve() == old_install.resolve()
+    prefix_was_install = (
+        old_prefix and old_install and old_prefix.resolve() == old_install.resolve()
+    )
 
     if prefix_was_install:
         # Prefix moved together with install above; update path to match.
@@ -68,8 +69,7 @@ def move_game_data(
     elif old_prefix and old_prefix.resolve() != new_prefix.resolve():
         if new_prefix.exists():
             raise RuntimeError(
-                f"Target prefix already exists: {new_prefix}\n"
-                "Remove it manually before migrating."
+                f"Target prefix already exists: {new_prefix}\nRemove it manually before migrating."
             )
         _log(f"Moving Wine prefix → {new_prefix} …")
         new_prefix.parent.mkdir(parents=True, exist_ok=True)

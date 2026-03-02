@@ -42,6 +42,9 @@ class AppConfig:
     # GPU override: DRI_PRIME index; None = system default
     gpu_index: int | None = None
 
+    # Save file backup: absolute path to save files dir/file; empty = not configured
+    save_path: str = ""
+
 
 def load_app_config(app_id: str, config: Config) -> AppConfig:
     """Load per-app config from TOML, returning defaults if the file doesn't exist."""
@@ -54,6 +57,7 @@ def load_app_config(app_id: str, config: Config) -> AppConfig:
 
     wine = raw.get("wine", {})
     launch = raw.get("launch", {})
+    backup = raw.get("backup", {})
     return AppConfig(
         arch=wine.get("arch", "win64"),
         winetricks_verbs=wine.get("winetricks_verbs", []),
@@ -65,6 +69,7 @@ def load_app_config(app_id: str, config: Config) -> AppConfig:
         dxvk=wine.get("dxvk", False),
         vkd3d=wine.get("vkd3d", False),
         gpu_index=launch.get("gpu_index"),
+        save_path=backup.get("save_path", ""),
     )
 
 
@@ -89,6 +94,8 @@ def save_app_config(app_id: str, config: Config, app_config: AppConfig) -> None:
         },
         "dll_overrides": app_config.dll_overrides,
     }
+    if app_config.save_path:
+        data["backup"] = {"save_path": app_config.save_path}
 
     with open(path, "wb") as f:
         tomli_w.dump(data, f)

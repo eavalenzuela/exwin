@@ -240,10 +240,17 @@ class ExwinWindow(Adw.ApplicationWindow):
         update_last_launched(app_id, datetime.now(tz=UTC).isoformat())
         self.refresh_library()
 
-    def _uninstall_app(self, app: AppEntry) -> None:
-        from exwin.backend.prefix import delete_prefix
+    def _uninstall_app(self, app: AppEntry, delete_files: bool) -> None:
+        if delete_files:
+            import shutil
+            from pathlib import Path
 
-        delete_prefix(app.app_id, self._config)
+            install = Path(app.install_path) if app.install_path else None
+            prefix = Path(app.prefix_path) if app.prefix_path else None
+            if install and install.exists():
+                shutil.rmtree(install, ignore_errors=True)
+            if prefix and prefix != install and prefix.exists():
+                shutil.rmtree(prefix, ignore_errors=True)
         delete_app(app.app_id)
         self.refresh_library()
         self.show_toast(f'"{app.name}" uninstalled')

@@ -19,6 +19,7 @@ class AppEntry:
     install_date: str = ""
     last_launched: str = ""
     runtime_id: int | None = None
+    playtime_seconds: int = 0
     is_running: bool = field(default=False, compare=False)
 
     @classmethod
@@ -35,4 +36,5 @@ class AppEntry:
             install_date=row["install_date"] or "",
             last_launched=row["last_launched"] or "",
             runtime_id=row["runtime_id"],
+            playtime_seconds=row["playtime_seconds"] or 0,
         )

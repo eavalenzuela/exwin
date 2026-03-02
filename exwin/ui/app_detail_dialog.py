@@ -16,7 +16,9 @@ from gi.repository import Adw, Gtk  # noqa: E402
 from exwin.backend.app_config import AppConfig, load_app_config  # noqa: E402
 from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
+from exwin.backend.saves import backup_saves, list_backups, restore_saves  # noqa: E402
 from exwin.models import AppEntry  # noqa: E402
+from exwin.ui.library_page import _fmt_playtime  # noqa: E402
 
 
 class AppDetailDialog(Adw.Dialog):
@@ -30,7 +32,7 @@ class AppDetailDialog(Adw.Dialog):
         runtime: Runtime | None,
         on_launch: Callable[[AppEntry], None],
         on_stop: Callable[[AppEntry], None],
-        on_uninstall: Callable[[AppEntry], None],
+        on_uninstall: Callable[[AppEntry, bool], None],
         on_settings_saved: Callable[[str, AppConfig], None] | None = None,
         on_paths_changed: Callable[[AppEntry], None] | None = None,
         **kwargs,
@@ -45,6 +47,7 @@ class AppDetailDialog(Adw.Dialog):
         self._on_settings_saved = on_settings_saved
         self._on_paths_changed = on_paths_changed
         self._migrate_btn: Gtk.Button | None = None
+        self._app_config = load_app_config(app.app_id, config)
 
         toolbar_view = Adw.ToolbarView()
         self.set_child(toolbar_view)
@@ -127,6 +130,8 @@ class AppDetailDialog(Adw.Dialog):
             info_group.add(_info_row("Installed", app.install_date[:10]))
         if app.last_launched:
             info_group.add(_info_row("Last Launched", app.last_launched[:10]))
+        if app.playtime_seconds > 0:
+            info_group.add(_info_row("Play Time", _fmt_playtime(app.playtime_seconds)))
 
         # Action buttons
         btn_box = Gtk.Box(
@@ -157,6 +162,18 @@ class AppDetailDialog(Adw.Dialog):
                 migrate_btn.connect("clicked", self._on_migrate_clicked)
                 btn_box.append(migrate_btn)
                 self._migrate_btn = migrate_btn
+
+        if self._app_config.save_path:
+            backup_btn = Gtk.Button(label="Back Up Saves")
+            backup_btn.add_css_class("flat")
+            backup_btn.connect("clicked", self._on_backup_saves)
+            btn_box.append(backup_btn)
+
+            if list_backups(app.app_id, config):
+                restore_btn = Gtk.Button(label="Restore Saves")
+                restore_btn.add_css_class("flat")
+                restore_btn.connect("clicked", self._on_restore_saves)
+                btn_box.append(restore_btn)
 
         if is_running:
             primary_btn = Gtk.Button(label="Stop")
@@ -207,7 +224,22 @@ class AppDetailDialog(Adw.Dialog):
         self.close()
 
     def _on_uninstall_clicked(self, _btn: Gtk.Button) -> None:
-        self._on_uninstall(self._app)
+        dialog = Adw.AlertDialog(
+            heading="Uninstall Game?",
+            body=f'Remove "{self._app.name}" from your library.',
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("keep", "Keep Files")
+        dialog.add_response("delete", "Delete Files")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.connect("response", self._on_uninstall_confirmed)
+        dialog.present(self)
+
+    def _on_uninstall_confirmed(self, _dialog: Adw.AlertDialog, response: str) -> None:
+        if response == "cancel":
+            return
+        self._on_uninstall(self._app, response == "delete")
         self.close()
 
     def _on_open_prefix(self, _btn: Gtk.Button) -> None:
@@ -272,6 +304,29 @@ class AppDetailDialog(Adw.Dialog):
             msg = f"Shortcut created: {dest.name}"
         except Exception as exc:
             msg = f"Shortcut failed: {exc}"
+        root = self.get_root()
+        if hasattr(root, "show_toast"):
+            root.show_toast(msg)
+
+    def _on_backup_saves(self, _btn: Gtk.Button) -> None:
+        try:
+            dest = backup_saves(self._app, self._app_config, self._config)
+            msg = f"Saves backed up: {dest.name}"
+        except Exception as exc:
+            msg = f"Backup failed: {exc}"
+        root = self.get_root()
+        if hasattr(root, "show_toast"):
+            root.show_toast(msg)
+
+    def _on_restore_saves(self, _btn: Gtk.Button) -> None:
+        backups = list_backups(self._app.app_id, self._config)
+        if not backups:
+            return
+        try:
+            restore_saves(backups[0], self._app_config)
+            msg = f"Saves restored from: {backups[0].name}"
+        except Exception as exc:
+            msg = f"Restore failed: {exc}"
         root = self.get_root()
         if hasattr(root, "show_toast"):
             root.show_toast(msg)

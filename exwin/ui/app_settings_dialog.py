@@ -62,6 +62,7 @@ class AppSettingsDialog(Adw.Dialog):
         self._build_wine_group(prefs, app_config)
         self._build_launch_group(prefs, app_config)
         self._build_gpu_group(prefs, app_config)
+        self._build_saves_group(prefs, app_config)
         self._build_cover_art_group(prefs, app)
         self._build_env_group(prefs, app_config)
         self._build_dll_group(prefs, app_config)
@@ -173,6 +174,24 @@ class AppSettingsDialog(Adw.Dialog):
             self._gpu_row.set_selected(0)
 
         group.add(self._gpu_row)
+
+    def _build_saves_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
+        group = Adw.PreferencesGroup(
+            title="Saves",
+            description="Absolute path to the save files directory or file for this game",
+        )
+        prefs.add(group)
+
+        self._save_path_row = Adw.EntryRow(title="Save Files Path")
+        self._save_path_row.set_text(cfg.save_path or "")
+
+        browse_btn = Gtk.Button(icon_name="document-open-symbolic")
+        browse_btn.add_css_class("flat")
+        browse_btn.set_valign(Gtk.Align.CENTER)
+        browse_btn.connect("clicked", self._on_browse_save_path)
+        self._save_path_row.add_suffix(browse_btn)
+
+        group.add(self._save_path_row)
 
     def _build_cover_art_group(self, prefs: Adw.PreferencesPage, app: AppEntry) -> None:
         group = Adw.PreferencesGroup(
@@ -348,6 +367,19 @@ class AppSettingsDialog(Adw.Dialog):
             return
         self._cover_row.set_text(gfile.get_path())
 
+    def _on_browse_save_path(self, _btn: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog(title="Select Save Files Folder")
+        dialog.select_folder(self.get_root(), None, self._on_save_path_chosen)
+
+    def _on_save_path_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        from gi.repository import GLib as _GLib
+
+        try:
+            gfile = dialog.select_folder_finish(result)
+        except _GLib.Error:
+            return
+        self._save_path_row.set_text(gfile.get_path())
+
     def _cover_art_thread(self, cfg: AppConfig, source: str, btn: Gtk.Button) -> None:
         try:
             apply_custom_cover_art(self._app.app_id, source, self._config)
@@ -434,6 +466,7 @@ class AppSettingsDialog(Adw.Dialog):
             mangohud=self._mangohud_row.get_active(),
             dll_overrides=dll_overrides,
             gpu_index=gpu_index,
+            save_path=self._save_path_row.get_text().strip(),
         )
 
 

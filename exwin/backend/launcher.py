@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -60,6 +61,7 @@ class Launcher:
         log_path = self._config.logs_dir / f"{app.app_id}.log"
         log_file = open(log_path, "w")  # noqa: SIM115 — kept open until process exits
 
+        start_time = time.monotonic()
         proc = subprocess.Popen(
             cmd,
             env=env,
@@ -73,7 +75,7 @@ class Launcher:
         # the callback safely on the GTK main thread.
         threading.Thread(
             target=self._watch,
-            args=(app.app_id, proc, log_file, on_exit),
+            args=(app.app_id, proc, log_file, on_exit, start_time),
             daemon=True,
         ).start()
 
@@ -93,10 +95,15 @@ class Launcher:
         proc: subprocess.Popen,
         log_file,
         on_exit: Callable[[str], None] | None,
+        start_time: float,
     ) -> None:
         proc.wait()
+        elapsed = int(time.monotonic() - start_time)
         log_file.close()
         self._running.pop(app_id, None)
+        from exwin.db.apps import update_playtime
+
+        update_playtime(app_id, elapsed)
         if on_exit:
             GLib.idle_add(on_exit, app_id)
 

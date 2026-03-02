@@ -62,6 +62,14 @@ def update_cover_art(app_id: str, path: str) -> None:
         conn.execute("UPDATE apps SET cover_art_path = ? WHERE id = ?", (path, app_id))
 
 
+def update_playtime(app_id: str, elapsed_seconds: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE apps SET playtime_seconds = playtime_seconds + ? WHERE id = ?",
+            (elapsed_seconds, app_id),
+        )
+
+
 def update_paths(app_id: str, install_path: str, prefix_path: str) -> None:
     with get_conn() as conn:
         conn.execute(

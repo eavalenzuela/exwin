@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS apps (
     cover_art_path TEXT,
     description   TEXT,
     install_date  TEXT,              -- ISO 8601 datetime
-    last_launched TEXT               -- ISO 8601 datetime, NULL if never run
+    last_launched TEXT,              -- ISO 8601 datetime, NULL if never run
+    playtime_seconds INTEGER DEFAULT 0
 );
 """
 
@@ -45,6 +46,11 @@ def init_db(data_dir: Path) -> None:
     _DB_PATH = data_dir / "library.db"
     with sqlite3.connect(_DB_PATH) as conn:
         conn.executescript(_SCHEMA)
+        try:
+            conn.execute("ALTER TABLE apps ADD COLUMN playtime_seconds INTEGER DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
 
 @contextmanager

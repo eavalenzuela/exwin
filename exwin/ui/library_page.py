@@ -18,6 +18,13 @@ from exwin.models import AppEntry  # noqa: E402
 _CARD_WIDTH = 160
 
 
+def _fmt_playtime(seconds: int) -> str:
+    if seconds < 60:
+        return "< 1m"
+    h, m = divmod(seconds // 60, 60)
+    return f"{h}h {m}m" if h else f"{m}m"
+
+
 class LibraryPage(Gtk.Box):
     """Main library view: search bar + flow grid of app cards."""
 
@@ -151,6 +158,13 @@ class _AppCard(Gtk.Box):
         name_label.set_halign(Gtk.Align.START)
         name_label.set_max_width_chars(20)
         label_box.append(name_label)
+
+        if app.playtime_seconds > 0:
+            pt_label = Gtk.Label(label=_fmt_playtime(app.playtime_seconds))
+            pt_label.add_css_class("caption")
+            pt_label.add_css_class("dim-label")
+            pt_label.set_halign(Gtk.Align.START)
+            label_box.append(pt_label)
 
         # Bottom row: source badge + optional running indicator
         bottom_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
