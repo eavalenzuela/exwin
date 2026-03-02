@@ -291,8 +291,12 @@ class TrayIcon:
         invocation: Gio.DBusMethodInvocation,
     ) -> None:
         if method_name == "GetLayout":
-            layout = self._build_layout_variant()
-            invocation.return_value(GLib.Variant.new_tuple([GLib.Variant("u", 1), layout]))
+            # Build (u(ia{sv}av)) in one shot from a plain Python tuple so
+            # PyGObject can apply the full type string without needing
+            # GLib.Variant.new_tuple (broken as a class-method call in this
+            # version of PyGObject).
+            layout_tuple = self._build_layout_tuple()
+            invocation.return_value(GLib.Variant("(u(ia{sv}av))", (1, layout_tuple)))
         elif method_name == "GetGroupProperties":
             invocation.return_value(GLib.Variant("(a(ia{sv}))", ([],)))
         elif method_name == "GetProperty":
@@ -349,25 +353,25 @@ class TrayIcon:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _build_layout_variant(self) -> GLib.Variant:
-        """Return the root menu layout as a GLib.Variant of type (ia{sv}av)."""
+    def _build_layout_tuple(self) -> tuple:
+        """Return the root menu layout as a plain Python tuple.
+
+        The caller embeds this directly in GLib.Variant("(u(ia{sv}av))", ...)
+        so PyGObject can apply the full type string in one pass.  Each child
+        item is pre-built as GLib.Variant("v", ...) since the 'av' type
+        requires each element to already be a boxed variant.
+        """
 
         def _item(item_id: int, label: str) -> GLib.Variant:
-            """Build a single menu item variant, wrapped as 'v' for the av array."""
             props: dict[str, GLib.Variant] = {
                 "label": GLib.Variant("s", label),
                 "enabled": GLib.Variant("b", True),
                 "visible": GLib.Variant("b", True),
                 "type": GLib.Variant("s", "standard"),
             }
-            inner = GLib.Variant("(ia{sv}av)", (item_id, props, []))
-            return GLib.Variant("v", inner)
+            return GLib.Variant("v", GLib.Variant("(ia{sv}av)", (item_id, props, [])))
 
-        children = [
-            _item(1, f"Show {self._title}"),
-            _item(2, "Quit"),
-        ]
-        return GLib.Variant("(ia{sv}av)", (0, {}, children))
+        return (0, {}, [_item(1, f"Show {self._title}"), _item(2, "Quit")])
 
     def _cleanup_registrations(self) -> None:
         if self._conn is None:
