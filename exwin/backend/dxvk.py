@@ -76,6 +76,10 @@ def install_vkd3d(
         extract_dir = Path(tmpdir) / "vkd3d-proton"
         extract_dir.mkdir()
         with tarfile.open(tarball_path) as tf:
+            for member in tf.getmembers():
+                target = (extract_dir / member.name).resolve()
+                if not target.is_relative_to(extract_dir.resolve()):
+                    raise RuntimeError(f"Tar path traversal blocked: {member.name}")
             tf.extractall(extract_dir)
 
         # The tarball extracts to a single directory; find setup script inside it

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -35,12 +36,14 @@ class AppDetailDialog(Adw.Dialog):
         on_uninstall: Callable[[AppEntry, bool], None],
         on_settings_saved: Callable[[str, AppConfig], None] | None = None,
         on_paths_changed: Callable[[AppEntry], None] | None = None,
+        runtimes: list[Runtime] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(title=app.name, content_width=440, content_height=560, **kwargs)
         self._app = app
         self._config = config
         self._runtime = runtime
+        self._runtimes = runtimes or []
         self._on_launch = on_launch
         self._on_stop = on_stop
         self._on_uninstall = on_uninstall
@@ -207,6 +210,7 @@ class AppDetailDialog(Adw.Dialog):
             app_config=app_config,
             config=self._config,
             runtime=self._runtime,
+            runtimes=self._runtimes,
             on_saved=self._on_app_settings_saved,
         )
         dialog.present(self.get_root())
@@ -297,36 +301,58 @@ class AppDetailDialog(Adw.Dialog):
             root.show_toast(f"Migration failed: {msg}")
 
     def _on_make_shortcut(self, _btn: Gtk.Button) -> None:
+        from gi.repository import GLib
+
         from exwin.backend.desktop_shortcut import create_shortcut
 
-        try:
-            dest = create_shortcut(self._app)
-            msg = f"Shortcut created: {dest.name}"
-        except Exception as exc:
-            msg = f"Shortcut failed: {exc}"
-        root = self.get_root()
-        if hasattr(root, "show_toast"):
-            root.show_toast(msg)
+        _btn.set_sensitive(False)
+
+        def _work() -> None:
+            try:
+                dest = create_shortcut(self._app)
+                msg = f"Shortcut created: {dest.name}"
+            except Exception as exc:
+                msg = f"Shortcut failed: {exc}"
+            GLib.idle_add(self._show_toast_and_reenable, msg, _btn)
+
+        threading.Thread(target=_work, daemon=True).start()
 
     def _on_backup_saves(self, _btn: Gtk.Button) -> None:
-        try:
-            dest = backup_saves(self._app, self._app_config, self._config)
-            msg = f"Saves backed up: {dest.name}"
-        except Exception as exc:
-            msg = f"Backup failed: {exc}"
-        root = self.get_root()
-        if hasattr(root, "show_toast"):
-            root.show_toast(msg)
+        from gi.repository import GLib
+
+        _btn.set_sensitive(False)
+
+        def _work() -> None:
+            try:
+                dest = backup_saves(self._app, self._app_config, self._config)
+                msg = f"Saves backed up: {dest.name}"
+            except Exception as exc:
+                msg = f"Backup failed: {exc}"
+            GLib.idle_add(self._show_toast_and_reenable, msg, _btn)
+
+        threading.Thread(target=_work, daemon=True).start()
 
     def _on_restore_saves(self, _btn: Gtk.Button) -> None:
+        from gi.repository import GLib
+
         backups = list_backups(self._app.app_id, self._config)
         if not backups:
             return
-        try:
-            restore_saves(backups[0], self._app_config)
-            msg = f"Saves restored from: {backups[0].name}"
-        except Exception as exc:
-            msg = f"Restore failed: {exc}"
+
+        _btn.set_sensitive(False)
+
+        def _work() -> None:
+            try:
+                restore_saves(backups[0], self._app_config)
+                msg = f"Saves restored from: {backups[0].name}"
+            except Exception as exc:
+                msg = f"Restore failed: {exc}"
+            GLib.idle_add(self._show_toast_and_reenable, msg, _btn)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _show_toast_and_reenable(self, msg: str, btn: Gtk.Button) -> None:
+        btn.set_sensitive(True)
         root = self.get_root()
         if hasattr(root, "show_toast"):
             root.show_toast(msg)

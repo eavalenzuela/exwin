@@ -86,12 +86,16 @@ def _headless_launch(app_id: str) -> None:
 
     app_config = load_app_config(app_id, config)
     launcher = Launcher(config)
-    cmd = launcher._build_command(app, runtime, app_config)
-    env = launcher._build_env(app, runtime, app_config)
+    cmd = launcher.build_command(app, runtime, app_config)
+    env = launcher.build_env(app, runtime, app_config)
+
+    log_path = config.logs_dir / f"{app_id}.log"
+    log_file = open(log_path, "w")  # noqa: SIM115
 
     start_time = time.monotonic()
-    proc = subprocess.Popen(cmd, env=env)
+    proc = subprocess.Popen(cmd, env=env, stdout=log_file, stderr=log_file)
     proc.wait()
+    log_file.close()
     elapsed = int(time.monotonic() - start_time)
     update_playtime(app_id, elapsed)
     update_last_launched(app_id, datetime.now(tz=UTC).isoformat())
@@ -122,34 +126,17 @@ def _cmd_list() -> None:
 
 
 def _cmd_remove(app_id: str, delete_files: bool) -> None:
-    import shutil
-    from pathlib import Path
-
     (config,) = _init()
 
-    from exwin.db.apps import delete_app, get_app
+    from exwin.db.apps import get_app
 
     app = get_app(app_id)
     if not app:
         sys.exit(f"exwin: app '{app_id}' not found in library")
 
-    if delete_files:
-        install = Path(app.install_path) if app.install_path else None
-        prefix = Path(app.prefix_path) if app.prefix_path else None
-        if install and install.exists():
-            shutil.rmtree(install, ignore_errors=True)
-            print(f"Deleted: {install}")
-        if prefix and prefix != install and prefix.exists():
-            shutil.rmtree(prefix, ignore_errors=True)
-            print(f"Deleted: {prefix}")
+    from exwin.backend.uninstall import uninstall_app
 
-    shutil.rmtree(config.metadata_dir / app_id, ignore_errors=True)
-    print(f"Deleted metadata: {config.metadata_dir / app_id}")
-    shutil.rmtree(config.apps_dir / app_id, ignore_errors=True)
-    print(f"Deleted config: {config.apps_dir / app_id}")
-
-    delete_app(app_id)
-    print(f'"{app.name}" removed from library.')
+    uninstall_app(app, config, delete_files, on_progress=print)
 
 
 def _cmd_migrate(app_id: str) -> None:

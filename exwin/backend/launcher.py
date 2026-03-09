@@ -31,6 +31,7 @@ class Launcher:
 
     def __init__(self, config: Config) -> None:
         self._config = config
+        self._lock = threading.Lock()
         # app_id → Popen
         self._running: dict[str, subprocess.Popen] = {}
 
@@ -39,10 +40,12 @@ class Launcher:
     # ------------------------------------------------------------------
 
     def is_running(self, app_id: str) -> bool:
-        return app_id in self._running
+        with self._lock:
+            return app_id in self._running
 
     def running_ids(self) -> frozenset[str]:
-        return frozenset(self._running)
+        with self._lock:
+            return frozenset(self._running)
 
     def launch(
         self,
@@ -52,11 +55,12 @@ class Launcher:
         on_exit: Callable[[str], None] | None = None,
     ) -> None:
         """Launch *app* using *runtime*.  No-op if already running."""
-        if app.app_id in self._running:
-            return
+        with self._lock:
+            if app.app_id in self._running:
+                return
 
-        cmd = self._build_command(app, runtime, app_config)
-        env = self._build_env(app, runtime, app_config)
+        cmd = self.build_command(app, runtime, app_config)
+        env = self.build_env(app, runtime, app_config)
 
         log_path = self._config.logs_dir / f"{app.app_id}.log"
         log_file = open(log_path, "w")  # noqa: SIM115 — kept open until process exits
@@ -69,7 +73,8 @@ class Launcher:
             stderr=log_file,
             start_new_session=True,  # detach from our terminal
         )
-        self._running[app.app_id] = proc
+        with self._lock:
+            self._running[app.app_id] = proc
 
         # Watch for exit in a daemon thread; use GLib.idle_add to fire
         # the callback safely on the GTK main thread.
@@ -81,9 +86,18 @@ class Launcher:
 
     def stop(self, app_id: str) -> None:
         """Send SIGTERM to a running app.  The watch thread handles cleanup."""
-        proc = self._running.get(app_id)
+        with self._lock:
+            proc = self._running.get(app_id)
         if proc:
             proc.terminate()
+
+    def build_command(self, app: AppEntry, runtime: Runtime, app_config: AppConfig) -> list[str]:
+        """Build the launch command list for an app."""
+        return self._build_command(app, runtime, app_config)
+
+    def build_env(self, app: AppEntry, runtime: Runtime, app_config: AppConfig) -> dict[str, str]:
+        """Build the environment dict for launching an app."""
+        return self._build_env(app, runtime, app_config)
 
     # ------------------------------------------------------------------
     # Internal
@@ -100,7 +114,13 @@ class Launcher:
         proc.wait()
         elapsed = int(time.monotonic() - start_time)
         log_file.close()
-        self._running.pop(app_id, None)
+
+        # Guard against double-cleanup if stop() races with natural exit
+        with self._lock:
+            was_tracked = self._running.pop(app_id, None) is not None
+        if not was_tracked:
+            return
+
         from exwin.db.apps import update_playtime
 
         update_playtime(app_id, elapsed)
@@ -108,7 +128,12 @@ class Launcher:
             GLib.idle_add(on_exit, app_id)
 
     def _build_command(self, app: AppEntry, runtime: Runtime, app_config: AppConfig) -> list[str]:
-        exe_full = str(Path(app.install_path) / app.exe_path)
+        exe_path = Path(app.install_path) / app.exe_path
+        if not exe_path.exists():
+            raise FileNotFoundError(
+                f"Executable not found: {exe_path}\nCheck the executable path in app settings."
+            )
+        exe_full = str(exe_path)
 
         if runtime.is_proton:
             cmd = [str(runtime.proton_binary), "run", exe_full]

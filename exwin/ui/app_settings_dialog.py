@@ -34,6 +34,7 @@ class AppSettingsDialog(Adw.Dialog):
         config: Config,
         runtime: Runtime | None,
         on_saved: Callable[[AppConfig], None],
+        runtimes: list[Runtime] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -43,6 +44,7 @@ class AppSettingsDialog(Adw.Dialog):
         self._app_config = app_config
         self._config = config
         self._runtime = runtime
+        self._runtimes = runtimes or []
         self._on_saved = on_saved
 
         toolbar_view = Adw.ToolbarView()
@@ -59,6 +61,7 @@ class AppSettingsDialog(Adw.Dialog):
         scroll.set_child(prefs)
 
         self._build_executable_group(prefs, app, app_config)
+        self._build_runtime_group(prefs, app)
         self._build_wine_group(prefs, app_config)
         self._build_launch_group(prefs, app_config)
         self._build_gpu_group(prefs, app_config)
@@ -90,6 +93,36 @@ class AppSettingsDialog(Adw.Dialog):
         browse_btn.connect("clicked", self._on_browse_exe)
         self._exe_row.add_suffix(browse_btn)
         group.add(self._exe_row)
+
+    def _build_runtime_group(self, prefs: Adw.PreferencesPage, app: AppEntry) -> None:
+        group = Adw.PreferencesGroup(title="Runtime")
+        prefs.add(group)
+
+        if not self._runtimes:
+            info_row = Adw.ActionRow(
+                title="No runtimes detected",
+                subtitle="Add a Wine or Proton runtime in Settings",
+            )
+            group.add(info_row)
+            self._runtime_row = None
+            return
+
+        options = [rt.name for rt in self._runtimes]
+        self._runtime_row = Adw.ComboRow(
+            title="Wine / Proton Runtime",
+            subtitle="Select the runtime to use for this game",
+        )
+        self._runtime_row.set_model(Gtk.StringList.new(options))
+
+        # Select the runtime currently assigned to this app
+        selected = 0
+        if app.runtime_id is not None:
+            for i, rt in enumerate(self._runtimes):
+                if rt.db_id == app.runtime_id:
+                    selected = i
+                    break
+        self._runtime_row.set_selected(selected)
+        group.add(self._runtime_row)
 
     def _build_wine_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
         group = Adw.PreferencesGroup(title="Wine / Proton")
@@ -330,9 +363,17 @@ class AppSettingsDialog(Adw.Dialog):
                     (new_exe, self._app.app_id),
                 )
 
+        # Persist runtime selection to DB
+        if self._runtime_row is not None and self._runtimes:
+            from exwin.db.apps import update_runtime
+
+            selected_rt = self._runtimes[self._runtime_row.get_selected()]
+            update_runtime(self._app.app_id, selected_rt.db_id)
+
         cover_source = self._cover_row.get_text().strip()
         current_cover = self._app.cover_art_path or ""
         if cover_source and cover_source != current_cover:
+            self._cover_row.remove_css_class("error")
             _btn.set_sensitive(False)
             _btn.set_label("Saving…")
             threading.Thread(

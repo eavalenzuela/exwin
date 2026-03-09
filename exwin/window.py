@@ -15,7 +15,8 @@ from exwin.backend.app_config import load_app_config  # noqa: E402
 from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.launcher import Launcher  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
-from exwin.db.apps import delete_app, get_all_apps, update_last_launched  # noqa: E402
+from exwin.backend.uninstall import uninstall_app  # noqa: E402
+from exwin.db.apps import get_all_apps, update_last_launched  # noqa: E402
 from exwin.db.runtimes import get_runtime  # noqa: E402
 from exwin.models import AppEntry  # noqa: E402
 from exwin.ui.app_detail_dialog import AppDetailDialog  # noqa: E402
@@ -163,6 +164,7 @@ class ExwinWindow(Adw.ApplicationWindow):
             is_running=self._launcher.is_running(app.app_id),
             config=self._config,
             runtime=self._resolve_runtime(app),
+            runtimes=self._runtimes,
             on_launch=self._launch_app,
             on_stop=self._stop_app,
             on_uninstall=self._uninstall_app,
@@ -241,19 +243,7 @@ class ExwinWindow(Adw.ApplicationWindow):
         self.refresh_library()
 
     def _uninstall_app(self, app: AppEntry, delete_files: bool) -> None:
-        import shutil
-        from pathlib import Path
-
-        if delete_files:
-            install = Path(app.install_path) if app.install_path else None
-            prefix = Path(app.prefix_path) if app.prefix_path else None
-            if install and install.exists():
-                shutil.rmtree(install, ignore_errors=True)
-            if prefix and prefix != install and prefix.exists():
-                shutil.rmtree(prefix, ignore_errors=True)
-        shutil.rmtree(self._config.metadata_dir / app.app_id, ignore_errors=True)
-        shutil.rmtree(self._config.apps_dir / app.app_id, ignore_errors=True)
-        delete_app(app.app_id)
+        uninstall_app(app, self._config, delete_files)
         self.refresh_library()
         self.show_toast(f'"{app.name}" uninstalled')
 

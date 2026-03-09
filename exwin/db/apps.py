@@ -76,3 +76,8 @@ def update_paths(app_id: str, install_path: str, prefix_path: str) -> None:
             "UPDATE apps SET install_path = ?, prefix_path = ? WHERE id = ?",
             (install_path, prefix_path, app_id),
         )
+
+
+def update_runtime(app_id: str, runtime_id: int | None) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE apps SET runtime_id = ? WHERE id = ?", (runtime_id, app_id))

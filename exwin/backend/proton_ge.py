@@ -77,6 +77,11 @@ def download_and_install(
                     on_progress(downloaded, total)
 
         with tarfile.open(tarball) as tf:
+            resolved_dest = dest_dir.resolve()
+            for member in tf.getmembers():
+                target = (dest_dir / member.name).resolve()
+                if not target.is_relative_to(resolved_dest):
+                    raise RuntimeError(f"Tar path traversal blocked: {member.name}")
             tf.extractall(dest_dir)
 
     # The tarball should have extracted to a directory named after the tag

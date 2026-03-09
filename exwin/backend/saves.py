@@ -37,8 +37,13 @@ def backup_saves(app: AppEntry, app_config: AppConfig, config: Config) -> Path:
 def restore_saves(backup_path: Path, app_config: AppConfig) -> None:
     """Extract backup_path zip back to save_path parent directory."""
     save_path = Path(app_config.save_path)
+    dest = save_path.parent.resolve()
     with zipfile.ZipFile(backup_path, "r") as zf:
-        zf.extractall(save_path.parent)
+        for member in zf.infolist():
+            target = (dest / member.filename).resolve()
+            if not target.is_relative_to(dest):
+                raise ValueError(f"Zip path traversal blocked: {member.filename}")
+        zf.extractall(dest)
 
 
 def list_backups(app_id: str, config: Config) -> list[Path]:
