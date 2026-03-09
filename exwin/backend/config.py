@@ -28,6 +28,12 @@ class Config:
     default_runtime: str = ""  # empty = auto-detect
     color_scheme: str = "system"  # "system" | "light" | "dark"
     storage_root: Path | None = None  # None = use data_dir/{apps,prefixes} (default)
+    backup_max_count: int = 5  # max save backups per game (0 = unlimited)
+
+    # Window state (restored on startup)
+    window_width: int = 1100
+    window_height: int = 700
+    sidebar_visible: bool = True
 
     # ------------------------------------------------------------------ #
     # Derived paths (not stored; computed from data_dir)
@@ -94,11 +100,16 @@ class Config:
             raw = tomllib.load(f)
 
         raw_sr = raw.get("storage_root")
+        win = raw.get("window", {})
         cfg = cls(
             data_dir=base_dir,  # env var always wins; TOML value is informational only
             default_runtime=raw.get("default_runtime", ""),
             color_scheme=raw.get("color_scheme", "system"),
             storage_root=Path(raw_sr) if raw_sr else None,
+            backup_max_count=raw.get("backup_max_count", 5),
+            window_width=win.get("width", 1100),
+            window_height=win.get("height", 700),
+            sidebar_visible=win.get("sidebar_visible", True),
         )
         cfg._ensure_dirs()
         return cfg
@@ -110,9 +121,15 @@ class Config:
             "data_dir": str(self.data_dir),
             "default_runtime": self.default_runtime,
             "color_scheme": self.color_scheme,
+            "backup_max_count": self.backup_max_count,
         }
         if self.storage_root is not None:
             data["storage_root"] = str(self.storage_root)
+        data["window"] = {
+            "width": self.window_width,
+            "height": self.window_height,
+            "sidebar_visible": self.sidebar_visible,
+        }
         with open(self.config_path, "wb") as f:
             tomli_w.dump(data, f)
 

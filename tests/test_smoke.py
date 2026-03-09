@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Module import smoke tests (no display required)
 # ---------------------------------------------------------------------------
@@ -113,11 +112,7 @@ def test_env_data_dir_override(tmp_path: Path) -> None:
         [
             sys.executable,
             "-c",
-            (
-                "from exwin.backend.config import Config; "
-                "cfg = Config.load(); "
-                "print(cfg.data_dir)"
-            ),
+            ("from exwin.backend.config import Config; cfg = Config.load(); print(cfg.data_dir)"),
         ],
         env=env,
         capture_output=True,

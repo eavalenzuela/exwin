@@ -10,7 +10,7 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gtk, Pango  # noqa: E402
 
 from exwin.models import AppEntry  # noqa: E402
 
@@ -39,12 +39,23 @@ def _fmt_playtime(seconds: int) -> str:
 class LibraryPage(Gtk.Box):
     """Main library view: search bar + flow grid of app cards."""
 
-    def __init__(self, on_app_activated: Callable[[AppEntry], None]) -> None:
+    def __init__(
+        self,
+        on_app_activated: Callable[[AppEntry], None],
+        on_installer_dropped: Callable[[Path], None] | None = None,
+    ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._on_app_activated = on_app_activated
+        self._on_installer_dropped = on_installer_dropped
+
+        # Drag-and-drop: accept .exe files dropped onto the library
+        drop_target = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
+        drop_target.connect("drop", self._on_drop)
+        self.add_controller(drop_target)
         self._sort_index = 0
         self._sort_descending = False
         self._source_filter = "All"
+        self._tag_filter = "All"
 
         # ── Search bar ──────────────────────────────────────────────────
         self._search_entry = Gtk.SearchEntry(placeholder_text="Search library…")
@@ -92,6 +103,15 @@ class LibraryPage(Gtk.Box):
         controls_box.append(Gtk.Label(label="Source:"))
         controls_box.append(self._filter_dropdown)
 
+        # Tag filter dropdown (populated dynamically)
+        self._tag_model = Gtk.StringList()
+        self._tag_model.append("All")
+        self._tag_dropdown = Gtk.DropDown(model=self._tag_model)
+        self._tag_dropdown.set_tooltip_text("Filter by tag")
+        self._tag_dropdown.connect("notify::selected", self._on_tag_filter_changed)
+        controls_box.append(Gtk.Label(label="Tag:"))
+        controls_box.append(self._tag_dropdown)
+
         # ── Content stack (empty state / grid) ──────────────────────────
         self._stack = Gtk.Stack()
         self._stack.set_vexpand(True)
@@ -135,7 +155,35 @@ class LibraryPage(Gtk.Box):
         """Replace the current card set with the given app list."""
         self._apps = list(apps)
         self._running_ids = running_ids
+        self._refresh_tag_dropdown()
         self._rebuild_grid()
+
+    def _refresh_tag_dropdown(self) -> None:
+        """Rebuild the tag filter dropdown from current apps."""
+        all_tags: set[str] = set()
+        for app in self._apps:
+            all_tags.update(app.tag_list)
+        tags = sorted(all_tags)
+
+        # Preserve selection if possible
+        prev = self._tag_filter
+
+        while self._tag_model.get_n_items() > 0:
+            self._tag_model.remove(0)
+        self._tag_model.append("All")
+        for t in tags:
+            self._tag_model.append(t)
+
+        # Re-select previous tag if still available
+        idx = 0
+        if prev != "All":
+            for i, t in enumerate(tags, start=1):
+                if t == prev:
+                    idx = i
+                    break
+            else:
+                self._tag_filter = "All"
+        self._tag_dropdown.set_selected(idx)
 
     def toggle_search(self) -> None:
         self.search_bar.set_search_mode(not self.search_bar.get_search_mode())
@@ -154,6 +202,10 @@ class LibraryPage(Gtk.Box):
         if self._source_filter != "All":
             source_key = self._source_filter.lower()
             apps = [a for a in apps if a.source == source_key]
+
+        # Apply tag filter
+        if self._tag_filter != "All":
+            apps = [a for a in apps if self._tag_filter in a.tag_list]
 
         # Apply sort
         _, key_fn = _SORT_OPTIONS[self._sort_index]
@@ -206,6 +258,22 @@ class LibraryPage(Gtk.Box):
         if hasattr(self, "_apps"):
             self._rebuild_grid()
 
+    def _on_tag_filter_changed(self, dropdown: Gtk.DropDown, _param) -> None:
+        idx = dropdown.get_selected()
+        item = self._tag_model.get_string(idx)
+        self._tag_filter = item or "All"
+        if hasattr(self, "_apps"):
+            self._rebuild_grid()
+
+    def _on_drop(self, _target: Gtk.DropTarget, value: Gdk.FileList, _x: float, _y: float) -> bool:
+        files = value.get_files()
+        for gfile in files:
+            fpath = Path(gfile.get_path())
+            if fpath.suffix.lower() == ".exe" and self._on_installer_dropped:
+                self._on_installer_dropped(fpath)
+                return True
+        return False
+
     def _on_child_activated(self, _fb: Gtk.FlowBox, child: Gtk.FlowBoxChild) -> None:
         card = child.get_child()
         if isinstance(card, _AppCard):
@@ -236,6 +304,7 @@ class _AppCard(Gtk.Box):
             cover.set_pixel_size(64)
         cover.set_size_request(_CARD_WIDTH, 220)
         cover.set_overflow(Gtk.Overflow.HIDDEN)
+        cover.update_property([Gtk.AccessibleProperty.LABEL], [f"Cover art for {app.name}"])
         self.append(cover)
 
         # Label area

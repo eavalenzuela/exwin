@@ -2,10 +2,19 @@
 
 import argparse
 import sys
+from importlib.metadata import version as _pkg_version
+
+
+def _get_version() -> str:
+    try:
+        return _pkg_version("exwin")
+    except Exception:
+        return "dev"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="exwin")
+    parser.add_argument("--version", action="version", version=f"exwin {_get_version()}")
     parser.add_argument(
         "--launch",
         metavar="APP_ID",
@@ -164,7 +173,7 @@ def _cmd_backup_saves(app_id: str) -> None:
     (config,) = _init()
 
     from exwin.backend.app_config import load_app_config
-    from exwin.backend.saves import backup_saves
+    from exwin.backend.saves import backup_saves, enforce_retention
     from exwin.db.apps import get_app
 
     app = get_app(app_id)
@@ -177,7 +186,10 @@ def _cmd_backup_saves(app_id: str) -> None:
 
     try:
         dest = backup_saves(app, app_config, config)
+        removed = enforce_retention(app_id, config)
         print(f"Saves backed up to: {dest}")
+        if removed:
+            print(f"  ({len(removed)} old backup(s) pruned)")
     except Exception as exc:
         sys.exit(f"exwin: backup failed: {exc}")
 

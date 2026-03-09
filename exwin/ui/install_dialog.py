@@ -45,12 +45,14 @@ class InstallDialog(Adw.Dialog):
         config: Config,
         runtimes: list[Runtime],
         on_installed: Callable[[AppEntry], None],
+        initial_installer: Path | None = None,
         **kwargs,
     ) -> None:
         super().__init__(title="Install Game", content_width=500, **kwargs)
         self._config = config
         self._runtimes = runtimes
         self._on_installed = on_installed
+        self._initial_installer = initial_installer
         self._installer_path: Path | None = None
         self._installer_parts: list[Path] = []
         self._installer_type: str = "innosetup"  # "innosetup" | "generic"
@@ -90,7 +92,13 @@ class InstallDialog(Adw.Dialog):
         self._build_done_page()
         self._build_error_page()
 
-        self._stack.set_visible_child_name("welcome")
+        if self._initial_installer and self._initial_installer.exists():
+            self._installer_path = self._initial_installer
+            self._installer_parts = find_sibling_parts(self._installer_path)
+            self._show_probing()
+        else:
+            self._stack.set_visible_child_name("welcome")
+            self._set_step(1)
 
     # ------------------------------------------------------------------
     # Page builders
@@ -332,6 +340,11 @@ class InstallDialog(Adw.Dialog):
         status_box.append(self._install_status_label)
         box.append(status_box)
 
+        self._progress_bar = Gtk.ProgressBar()
+        self._progress_bar.set_show_text(True)
+        self._progress_bar.set_visible(False)
+        box.append(self._progress_bar)
+
         scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
@@ -435,6 +448,19 @@ class InstallDialog(Adw.Dialog):
         self._stack.add_named(self._error_page, "error")
 
     # ------------------------------------------------------------------
+    # Step indicator
+    # ------------------------------------------------------------------
+
+    _TOTAL_STEPS = 4  # Choose → Configure → Install → Done
+
+    def _set_step(self, step: int, label: str | None = None) -> None:
+        """Update the subtitle with a step indicator like 'Step 1 of 4'."""
+        subtitle = f"Step {step} of {self._TOTAL_STEPS}"
+        if label:
+            subtitle += f" — {label}"
+        self._dialog_title.set_subtitle(subtitle)
+
+    # ------------------------------------------------------------------
     # Handlers — file selection & probing
     # ------------------------------------------------------------------
 
@@ -460,6 +486,7 @@ class InstallDialog(Adw.Dialog):
 
     def _show_probing(self) -> None:
         self._dialog_title.set_title("Reading installer…")
+        self._set_step(1, "Detecting")
         self._stack.set_visible_child_name("installing")
         self._install_spinner.set_spinning(True)
         self._install_status_label.set_label("Reading installer…")
@@ -488,6 +515,7 @@ class InstallDialog(Adw.Dialog):
         self._stack.set_visible_child_name("confirm")
         self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
 
+        self._set_step(2, "Configure")
         self._title_row.set_subtitle(info.title)
         self._gameid_row.set_subtitle(info.game_id or "N/A")
         self._lang_row.set_subtitle(", ".join(info.languages) or "N/A")
@@ -508,6 +536,7 @@ class InstallDialog(Adw.Dialog):
         assert self._installer_path is not None
         self._install_spinner.set_spinning(False)
         self._dialog_title.set_title(self._installer_path.stem)
+        self._set_step(2, "Configure")
         self._generic_file_row.set_subtitle(self._installer_path.name)
         self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
         self._stack.set_visible_child_name("confirm_generic")
@@ -522,10 +551,13 @@ class InstallDialog(Adw.Dialog):
             self._start_gog_wine_install()
             return
 
+        self._set_step(3, "Installing")
         self._stack.set_visible_child_name("installing")
         self._install_spinner.set_spinning(True)
         self._install_status_label.set_label("Installing…")
         self._log_buffer.set_text("")
+        self._progress_bar.set_fraction(0)
+        self._progress_bar.set_visible(True)
 
         threading.Thread(target=self._install_thread, daemon=True).start()
 
@@ -546,6 +578,7 @@ class InstallDialog(Adw.Dialog):
         self._generic_arch = arch
         self._gog_wine_mode = True
 
+        self._set_step(3, "Installing")
         self._stack.set_visible_child_name("wine_running")
         threading.Thread(
             target=self._wine_installer_thread,
@@ -560,6 +593,9 @@ class InstallDialog(Adw.Dialog):
         arch = _ARCH_OPTIONS[self._arch_row.get_selected()]
         verbs_text = self._winetricks_row.get_text().strip()
         verbs = verbs_text.split() if verbs_text else []
+
+        def _file_progress(current: int, total: int) -> None:
+            GLib.idle_add(self._update_progress, current, total)
 
         try:
             if self._dlc_switch_row.get_active() and self._base_games:
@@ -582,6 +618,7 @@ class InstallDialog(Adw.Dialog):
                     dxvk=self._dxvk_row.get_active(),
                     vkd3d=self._vkd3d_row.get_active(),
                     on_progress=lambda msg: GLib.idle_add(self._append_log, msg),
+                    on_file_progress=_file_progress,
                 )
                 GLib.idle_add(self._on_install_done, app)
         except Exception as exc:
@@ -616,6 +653,7 @@ class InstallDialog(Adw.Dialog):
         self._generic_runtime = runtime
         self._generic_arch = arch
 
+        self._set_step(3, "Installing")
         self._stack.set_visible_child_name("wine_running")
         threading.Thread(
             target=self._wine_installer_thread,
@@ -651,6 +689,12 @@ class InstallDialog(Adw.Dialog):
             )
             return
 
+        # When multiple candidates exist, let the user choose
+        if len(candidates) > 1:
+            self._populate_exe_select(candidates)
+            self._stack.set_visible_child_name("exe_select")
+            return
+
         best = pick_best_exe(candidates)
         assert self._installer_path is not None
         if self._gog_wine_mode and self._gog_probe_info is not None:
@@ -671,6 +715,25 @@ class InstallDialog(Adw.Dialog):
             args=(app_name, best, verbs),
             daemon=True,
         ).start()
+
+    def _populate_exe_select(self, candidates: list[Path]) -> None:
+        """Fill the exe selection list box with candidate executables."""
+        while (child := self._exe_list.get_first_child()) is not None:
+            self._exe_list.remove(child)
+
+        best = pick_best_exe(candidates)
+        first_row = None
+        for exe in candidates:
+            row = Adw.ActionRow(title=exe.name, subtitle=str(exe.parent))
+            row.exe_path = exe  # type: ignore[attr-defined]
+            self._exe_list.append(row)
+            if exe == best and first_row is None:
+                first_row = row
+
+        # Pre-select the best guess
+        if first_row is not None:
+            self._exe_list.select_row(first_row)
+            self._exe_confirm_btn.set_sensitive(True)
 
     def _on_exe_row_selected(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow | None) -> None:
         self._exe_confirm_btn.set_sensitive(row is not None)
@@ -757,17 +820,21 @@ class InstallDialog(Adw.Dialog):
 
     def _on_install_done(self, app: AppEntry) -> None:
         self._install_spinner.set_spinning(False)
+        self._progress_bar.set_visible(False)
+        self._set_step(4, "Done")
         self._done_page.set_description(f'"{app.name}" is ready to play.')
         self._stack.set_visible_child_name("done")
         self._on_installed(app)
 
     def _on_dlc_install_done(self, dlc_title: str, base_name: str) -> None:
         self._install_spinner.set_spinning(False)
+        self._set_step(4, "Done")
         self._done_page.set_description(f'DLC installed for "{base_name}".')
         self._stack.set_visible_child_name("done")
 
     def _on_error(self, message: str) -> None:
         self._install_spinner.set_spinning(False)
+        self._progress_bar.set_visible(False)
         self._error_page.set_description(message)
         self._stack.set_visible_child_name("error")
 
@@ -776,6 +843,15 @@ class InstallDialog(Adw.Dialog):
         self._gog_wine_mode = False
         self._dialog_title.set_title("Install Game")
         self._stack.set_visible_child_name("welcome")
+
+    def _update_progress(self, current: int, total: int) -> None:
+        if total > 0:
+            fraction = min(current / total, 1.0)
+            self._progress_bar.set_fraction(fraction)
+            self._progress_bar.set_text(f"{current} / {total} files")
+        else:
+            self._progress_bar.pulse()
+            self._progress_bar.set_text(f"{current} files")
 
     def _append_log(self, line: str) -> None:
         end = self._log_buffer.get_end_iter()

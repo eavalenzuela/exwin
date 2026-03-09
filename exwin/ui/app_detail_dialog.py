@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import threading
 from collections.abc import Callable
@@ -12,12 +13,17 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from exwin.backend.app_config import AppConfig, load_app_config  # noqa: E402
 from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
-from exwin.backend.saves import backup_saves, list_backups, restore_saves  # noqa: E402
+from exwin.backend.saves import (  # noqa: E402
+    backup_saves,
+    enforce_retention,
+    list_backups,
+    restore_saves,
+)
 from exwin.models import AppEntry  # noqa: E402
 from exwin.ui.library_page import _fmt_playtime  # noqa: E402
 
@@ -37,9 +43,10 @@ class AppDetailDialog(Adw.Dialog):
         on_settings_saved: Callable[[str, AppConfig], None] | None = None,
         on_paths_changed: Callable[[AppEntry], None] | None = None,
         runtimes: list[Runtime] | None = None,
+        launcher=None,  # noqa: ANN001
         **kwargs,
     ) -> None:
-        super().__init__(title=app.name, content_width=440, content_height=560, **kwargs)
+        super().__init__(title=app.name, content_width=440, **kwargs)
         self._app = app
         self._config = config
         self._runtime = runtime
@@ -50,6 +57,8 @@ class AppDetailDialog(Adw.Dialog):
         self._on_settings_saved = on_settings_saved
         self._on_paths_changed = on_paths_changed
         self._migrate_btn: Gtk.Button | None = None
+        self._launcher = launcher
+        self._is_running = is_running
         self._app_config = load_app_config(app.app_id, config)
 
         toolbar_view = Adw.ToolbarView()
@@ -85,6 +94,7 @@ class AppDetailDialog(Adw.Dialog):
             cover.set_pixel_size(96)
         cover.set_size_request(160, 220)
         cover.set_halign(Gtk.Align.CENTER)
+        cover.update_property([Gtk.AccessibleProperty.LABEL], [f"Cover art for {app.name}"])
         content.append(cover)
 
         # Name
@@ -107,11 +117,11 @@ class AppDetailDialog(Adw.Dialog):
         source_label.add_css_class("dim-label")
         status_box.append(source_label)
 
-        if is_running:
-            running_label = Gtk.Label(label="· Running")
-            running_label.add_css_class("caption")
-            running_label.add_css_class("success")
-            status_box.append(running_label)
+        self._running_label = Gtk.Label(label="· Running")
+        self._running_label.add_css_class("caption")
+        self._running_label.add_css_class("success")
+        self._running_label.set_visible(is_running)
+        status_box.append(self._running_label)
 
         # Description
         if app.description:
@@ -120,6 +130,20 @@ class AppDetailDialog(Adw.Dialog):
             desc.set_halign(Gtk.Align.START)
             desc.add_css_class("body")
             content.append(desc)
+
+        # Tags
+        tags_group = Adw.PreferencesGroup(title="Tags")
+        content.append(tags_group)
+
+        self._tags_row = Adw.EntryRow(title="Tags (comma-separated)")
+        self._tags_row.set_text(app.tags)
+        save_tags_btn = Gtk.Button(icon_name="document-save-symbolic")
+        save_tags_btn.add_css_class("flat")
+        save_tags_btn.set_valign(Gtk.Align.CENTER)
+        save_tags_btn.set_tooltip_text("Save tags")
+        save_tags_btn.connect("clicked", self._on_save_tags)
+        self._tags_row.add_suffix(save_tags_btn)
+        tags_group.add(self._tags_row)
 
         # Info rows (paths, dates)
         info_group = Adw.PreferencesGroup()
@@ -135,6 +159,16 @@ class AppDetailDialog(Adw.Dialog):
             info_group.add(_info_row("Last Launched", app.last_launched[:10]))
         if app.playtime_seconds > 0:
             info_group.add(_info_row("Play Time", _fmt_playtime(app.playtime_seconds)))
+        if app.install_path:
+            install_dir = Path(app.install_path)
+            size = _dir_size(install_dir)
+            if size > 0:
+                info_group.add(_info_row("Install Size", _fmt_size(size)))
+            try:
+                free = shutil.disk_usage(install_dir).free
+                info_group.add(_info_row("Disk Free", _fmt_size(free)))
+            except OSError:
+                pass
 
         # Action buttons
         btn_box = Gtk.Box(
@@ -187,17 +221,10 @@ class AppDetailDialog(Adw.Dialog):
             log_btn.connect("clicked", self._on_view_log)
             btn_box.append(log_btn)
 
-        if is_running:
-            primary_btn = Gtk.Button(label="Stop")
-            primary_btn.add_css_class("destructive-action")
-            primary_btn.add_css_class("pill")
-            primary_btn.connect("clicked", self._on_stop_clicked)
-        else:
-            primary_btn = Gtk.Button(label="Launch")
-            primary_btn.add_css_class("suggested-action")
-            primary_btn.add_css_class("pill")
-            primary_btn.connect("clicked", self._on_launch_clicked)
-        btn_box.append(primary_btn)
+        self._primary_btn = Gtk.Button()
+        self._primary_btn.add_css_class("pill")
+        self._update_primary_btn(is_running)
+        btn_box.append(self._primary_btn)
 
         # Wine prefix tools
         if app.prefix_path and runtime:
@@ -234,16 +261,28 @@ class AppDetailDialog(Adw.Dialog):
             kill_btn.connect("clicked", self._on_kill_prefix)
             tools_row.append(kill_btn)
 
-        uninstall_btn = Gtk.Button(label="Uninstall")
-        uninstall_btn.add_css_class("destructive-action")
-        uninstall_btn.set_sensitive(not is_running)
-        uninstall_btn.set_halign(Gtk.Align.CENTER)
-        uninstall_btn.connect("clicked", self._on_uninstall_clicked)
-        content.append(uninstall_btn)
+        self._uninstall_btn = Gtk.Button(label="Uninstall")
+        self._uninstall_btn.add_css_class("destructive-action")
+        self._uninstall_btn.set_sensitive(not is_running)
+        self._uninstall_btn.set_halign(Gtk.Align.CENTER)
+        self._uninstall_btn.connect("clicked", self._on_uninstall_clicked)
+        content.append(self._uninstall_btn)
+
+        # Poll running state every 2 seconds if launcher is available
+        if self._launcher is not None:
+            self._poll_source = GLib.timeout_add_seconds(2, self._poll_running_state)
 
     # ------------------------------------------------------------------
     # Button handlers
     # ------------------------------------------------------------------
+
+    def _on_save_tags(self, _btn: Gtk.Button) -> None:
+        from exwin.db.apps import update_tags
+
+        tags = self._tags_row.get_text().strip()
+        update_tags(self._app.app_id, tags)
+        self._app.tags = tags
+        self._show_toast("Tags saved")
 
     def _on_settings_clicked(self, _btn: Gtk.Button) -> None:
         from exwin.ui.app_settings_dialog import AppSettingsDialog
@@ -295,10 +334,19 @@ class AppDetailDialog(Adw.Dialog):
             subprocess.Popen(["xdg-open", self._app.prefix_path])
 
     def _on_migrate_clicked(self, _btn: Gtk.Button) -> None:
+        body = (
+            f"Move game files and Wine prefix to:\n{self._config.storage_root}\n\n"
+            "This may take a while for large games. The app must not be running."
+        )
+        if self._config.storage_root:
+            try:
+                free = shutil.disk_usage(self._config.storage_root).free
+                body += f"\n\nFree space on target: {_fmt_size(free)}"
+            except OSError:
+                pass
         dialog = Adw.AlertDialog(
             heading="Move Game Data?",
-            body=f"Move game files and Wine prefix to:\n{self._config.storage_root}\n\n"
-            "This may take a while for large games. The app must not be running.",
+            body=body,
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("move", "Move")
@@ -369,6 +417,7 @@ class AppDetailDialog(Adw.Dialog):
         def _work() -> None:
             try:
                 dest = backup_saves(self._app, self._app_config, self._config)
+                enforce_retention(self._app.app_id, self._config)
                 msg = f"Saves backed up: {dest.name}"
             except Exception as exc:
                 msg = f"Backup failed: {exc}"
@@ -430,6 +479,42 @@ class AppDetailDialog(Adw.Dialog):
             except Exception as exc:
                 self._show_toast(f"Kill prefix failed: {exc}")
 
+    def _update_primary_btn(self, is_running: bool) -> None:
+        """Reconfigure the primary action button for current running state."""
+        self._primary_btn.set_label("Stop" if is_running else "Launch")
+        # Remove both style classes first, then add the correct one
+        self._primary_btn.remove_css_class("destructive-action")
+        self._primary_btn.remove_css_class("suggested-action")
+        if is_running:
+            self._primary_btn.add_css_class("destructive-action")
+        else:
+            self._primary_btn.add_css_class("suggested-action")
+        # Reconnect click handler
+        try:
+            self._primary_btn.disconnect_by_func(self._on_launch_clicked)
+        except TypeError:
+            pass
+        try:
+            self._primary_btn.disconnect_by_func(self._on_stop_clicked)
+        except TypeError:
+            pass
+        if is_running:
+            self._primary_btn.connect("clicked", self._on_stop_clicked)
+        else:
+            self._primary_btn.connect("clicked", self._on_launch_clicked)
+
+    def _poll_running_state(self) -> bool:
+        """Periodically check if the app's running state has changed."""
+        if self._launcher is None:
+            return False  # stop polling
+        now_running = self._launcher.is_running(self._app.app_id)
+        if now_running != self._is_running:
+            self._is_running = now_running
+            self._running_label.set_visible(now_running)
+            self._update_primary_btn(now_running)
+            self._uninstall_btn.set_sensitive(not now_running)
+        return True  # keep polling
+
     def _show_toast(self, msg: str) -> None:
         root = self.get_root()
         if hasattr(root, "show_toast"):
@@ -451,3 +536,26 @@ def _info_row(title: str, value: str, *, copyable: bool = False) -> Adw.ActionRo
     row = Adw.ActionRow(title=title, subtitle=value)
     row.set_subtitle_selectable(copyable)
     return row
+
+
+def _fmt_size(nbytes: int) -> str:
+    """Format byte count as human-readable string."""
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(nbytes) < 1024:
+            return f"{nbytes:.1f} {unit}" if unit != "B" else f"{nbytes} B"
+        nbytes /= 1024  # type: ignore[assignment]
+    return f"{nbytes:.1f} PB"
+
+
+def _dir_size(path: Path) -> int:
+    """Total bytes of all files under *path*."""
+    if not path.is_dir():
+        return 0
+    total = 0
+    for f in path.rglob("*"):
+        if f.is_file():
+            try:
+                total += f.stat().st_size
+            except OSError:
+                pass
+    return total

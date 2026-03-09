@@ -42,7 +42,7 @@ class TestCreateShortcut:
         app = _make_app()
         dest = create_shortcut(app)
         content = dest.read_text()
-        exec_line = next(l for l in content.splitlines() if l.startswith("Exec="))
+        exec_line = next(line for line in content.splitlines() if line.startswith("Exec="))
         assert exec_line.startswith(f"Exec={sys.executable}")
 
     def test_icon_uses_cover_art_when_present(self, shortcut_dir: Path, tmp_path: Path) -> None:
@@ -51,21 +51,21 @@ class TestCreateShortcut:
         app = _make_app(cover=str(cover))
         dest = create_shortcut(app)
         content = dest.read_text()
-        icon_line = next(l for l in content.splitlines() if l.startswith("Icon="))
+        icon_line = next(line for line in content.splitlines() if line.startswith("Icon="))
         assert icon_line == f"Icon={cover}"
 
     def test_icon_fallback_when_no_cover(self, shortcut_dir: Path) -> None:
         app = _make_app(cover="")
         dest = create_shortcut(app)
         content = dest.read_text()
-        icon_line = next(l for l in content.splitlines() if l.startswith("Icon="))
+        icon_line = next(line for line in content.splitlines() if line.startswith("Icon="))
         assert icon_line == "Icon=applications-games-symbolic"
 
     def test_icon_fallback_when_cover_missing_on_disk(self, shortcut_dir: Path) -> None:
         app = _make_app(cover="/nonexistent/path/cover.jpg")
         dest = create_shortcut(app)
         content = dest.read_text()
-        icon_line = next(l for l in content.splitlines() if l.startswith("Icon="))
+        icon_line = next(line for line in content.splitlines() if line.startswith("Icon="))
         assert icon_line == "Icon=applications-games-symbolic"
 
     def test_name_field(self, shortcut_dir: Path) -> None:

@@ -85,6 +85,17 @@ class SettingsPage(Adw.PreferencesPage):
         scheme_row.connect("notify::selected", self._on_color_scheme_changed)
         general.add(scheme_row)
 
+        # ── Backups group ─────────────────────────────────────────────────
+        backup_group = Adw.PreferencesGroup(title="Save Backups")
+        self.add(backup_group)
+
+        self._retention_row = Adw.SpinRow.new_with_range(0, 100, 1)
+        self._retention_row.set_title("Max Backups Per Game")
+        self._retention_row.set_subtitle("0 = unlimited")
+        self._retention_row.set_value(config.backup_max_count)
+        self._retention_row.connect("notify::value", self._on_backup_max_changed)
+        backup_group.add(self._retention_row)
+
         # ── Wine / Proton group ──────────────────────────────────────────
         wine_group = Adw.PreferencesGroup(title="Wine / Proton")
         self.add(wine_group)
@@ -159,6 +170,10 @@ class SettingsPage(Adw.PreferencesPage):
         _, scheme, key = _COLOR_SCHEMES[row.get_selected()]
         Adw.StyleManager.get_default().set_color_scheme(scheme)
         self._config.color_scheme = key
+        self._config.save()
+
+    def _on_backup_max_changed(self, row: Adw.SpinRow, _param) -> None:
+        self._config.backup_max_count = int(row.get_value())
         self._config.save()
 
     def _on_download_ge_clicked(self, _btn: Gtk.Button) -> None:

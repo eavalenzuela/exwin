@@ -81,3 +81,21 @@ def update_paths(app_id: str, install_path: str, prefix_path: str) -> None:
 def update_runtime(app_id: str, runtime_id: int | None) -> None:
     with get_conn() as conn:
         conn.execute("UPDATE apps SET runtime_id = ? WHERE id = ?", (runtime_id, app_id))
+
+
+def update_tags(app_id: str, tags: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE apps SET tags = ? WHERE id = ?", (tags, app_id))
+
+
+def get_all_tags() -> list[str]:
+    """Return a sorted list of all unique tags across all apps."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT DISTINCT tags FROM apps WHERE tags != ''").fetchall()
+    all_tags: set[str] = set()
+    for row in rows:
+        for t in row["tags"].split(","):
+            t = t.strip()
+            if t:
+                all_tags.add(t)
+    return sorted(all_tags)

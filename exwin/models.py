@@ -20,7 +20,12 @@ class AppEntry:
     last_launched: str = ""
     runtime_id: int | None = None
     playtime_seconds: int = 0
+    tags: str = ""  # comma-separated tag list
     is_running: bool = field(default=False, compare=False)
+
+    @property
+    def tag_list(self) -> list[str]:
+        return [t.strip() for t in self.tags.split(",") if t.strip()] if self.tags else []
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> AppEntry:
@@ -37,4 +42,5 @@ class AppEntry:
             last_launched=row["last_launched"] or "",
             runtime_id=row["runtime_id"],
             playtime_seconds=row["playtime_seconds"] or 0,
+            tags=row["tags"] or "",
         )

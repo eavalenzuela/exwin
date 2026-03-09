@@ -9,7 +9,6 @@ import pytest
 from exwin.backend.app_config import AppConfig, load_app_config, save_app_config
 from exwin.backend.config import Config
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

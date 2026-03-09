@@ -37,9 +37,7 @@ class AppSettingsDialog(Adw.Dialog):
         runtimes: list[Runtime] | None = None,
         **kwargs,
     ) -> None:
-        super().__init__(
-            title=f"{app.name} — Settings", content_width=520, content_height=720, **kwargs
-        )
+        super().__init__(title=f"{app.name} — Settings", content_width=520, **kwargs)
         self._app = app
         self._app_config = app_config
         self._config = config
@@ -70,6 +68,10 @@ class AppSettingsDialog(Adw.Dialog):
         self._build_env_group(prefs, app_config)
         self._build_dll_group(prefs, app_config)
         self._build_action_row(toolbar_view)
+
+        # Snapshot initial state for dirty tracking
+        self._initial_state = self._snapshot()
+        self.connect("close-attempt", self._on_close_attempt)
 
     # ------------------------------------------------------------------
     # Group builders
@@ -218,6 +220,13 @@ class AppSettingsDialog(Adw.Dialog):
         self._save_path_row = Adw.EntryRow(title="Save Files Path")
         self._save_path_row.set_text(cfg.save_path or "")
 
+        detect_btn = Gtk.Button(icon_name="system-search-symbolic")
+        detect_btn.add_css_class("flat")
+        detect_btn.set_valign(Gtk.Align.CENTER)
+        detect_btn.set_tooltip_text("Auto-detect save file locations")
+        detect_btn.connect("clicked", self._on_detect_save_path)
+        self._save_path_row.add_suffix(detect_btn)
+
         browse_btn = Gtk.Button(icon_name="document-open-symbolic")
         browse_btn.add_css_class("flat")
         browse_btn.set_valign(Gtk.Align.CENTER)
@@ -349,6 +358,13 @@ class AppSettingsDialog(Adw.Dialog):
         self._exe_row.set_text(str(chosen))
 
     def _on_save(self, _btn: Gtk.Button) -> None:
+        errors = self._validate()
+        if errors:
+            root = self.get_root()
+            if hasattr(root, "show_toast"):
+                root.show_toast(errors[0])
+            return
+
         cfg = self._read_config()
         save_app_config(self._app.app_id, self._config, cfg)
 
@@ -407,6 +423,53 @@ class AppSettingsDialog(Adw.Dialog):
         except _GLib.Error:
             return
         self._cover_row.set_text(gfile.get_path())
+
+    def _on_detect_save_path(self, _btn: Gtk.Button) -> None:
+        from exwin.backend.save_detect import detect_save_paths
+
+        paths = detect_save_paths(self._app)
+        if not paths:
+            root = self.get_root()
+            if hasattr(root, "show_toast"):
+                root.show_toast("No save file locations detected")
+            return
+
+        dialog = Adw.AlertDialog(heading="Detected Save Locations")
+        dialog.add_response("cancel", "Cancel")
+        dialog.set_default_response("cancel")
+
+        # Use a preferences group as extra child to list paths
+        group = Adw.PreferencesGroup()
+        self._detect_checks: list[tuple[Gtk.CheckButton, Path]] = []
+        first_check: Gtk.CheckButton | None = None
+        for p in paths:
+            check = Gtk.CheckButton(label=str(p))
+            check.set_margin_top(4)
+            check.set_margin_bottom(4)
+            if first_check is None:
+                first_check = check
+                check.set_active(True)
+            else:
+                check.set_group(first_check)
+            row = Adw.ActionRow(title=str(p))
+            row.add_prefix(check)
+            row.set_activatable_widget(check)
+            group.add(row)
+            self._detect_checks.append((check, p))
+
+        dialog.set_extra_child(group)
+        dialog.add_response("select", "Select")
+        dialog.set_response_appearance("select", Adw.ResponseAppearance.SUGGESTED)
+        dialog.connect("response", self._on_detect_response)
+        dialog.present(self)
+
+    def _on_detect_response(self, _dialog: Adw.AlertDialog, response: str) -> None:
+        if response != "select":
+            return
+        for check, path in self._detect_checks:
+            if check.get_active():
+                self._save_path_row.set_text(str(path))
+                break
 
     def _on_browse_save_path(self, _btn: Gtk.Button) -> None:
         dialog = Gtk.FileDialog(title="Select Save Files Folder")
@@ -476,6 +539,84 @@ class AppSettingsDialog(Adw.Dialog):
         if hasattr(root, "show_toast"):
             msg = "Winetricks verbs applied." if success else "Winetricks failed — check logs."
             root.show_toast(msg)
+
+    def _snapshot(self) -> dict:
+        """Capture current field values for dirty comparison."""
+        env_buf = self._env_view.get_buffer()
+        dll_buf = self._dll_view.get_buffer()
+        return {
+            "exe": self._exe_row.get_text(),
+            "arch": self._arch_row.get_selected(),
+            "dxvk": self._dxvk_row.get_active(),
+            "vkd3d": self._vkd3d_row.get_active(),
+            "winetricks": self._winetricks_row.get_text(),
+            "gamemode": self._gamemode_row.get_active(),
+            "mangohud": self._mangohud_row.get_active(),
+            "args": self._args_row.get_text(),
+            "save_path": self._save_path_row.get_text(),
+            "cover": self._cover_row.get_text(),
+            "env": env_buf.get_text(env_buf.get_start_iter(), env_buf.get_end_iter(), False),
+            "dll": dll_buf.get_text(dll_buf.get_start_iter(), dll_buf.get_end_iter(), False),
+            "runtime": self._runtime_row.get_selected() if self._runtime_row else 0,
+            "gpu": self._gpu_row.get_selected() if self._gpu_row else 0,
+        }
+
+    def _is_dirty(self) -> bool:
+        return self._snapshot() != self._initial_state
+
+    def _on_close_attempt(self, _dialog: Adw.Dialog) -> None:
+        if not self._is_dirty():
+            self.force_close()
+            return
+        confirm = Adw.AlertDialog(heading="Unsaved Changes", body="Discard changes?")
+        confirm.add_response("cancel", "Keep Editing")
+        confirm.add_response("discard", "Discard")
+        confirm.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+        confirm.set_default_response("cancel")
+        confirm.connect("response", self._on_discard_response)
+        confirm.present(self)
+
+    def _on_discard_response(self, _dialog: Adw.AlertDialog, response: str) -> None:
+        if response == "discard":
+            self.force_close()
+
+    def _validate(self) -> list[str]:
+        """Validate text fields; return a list of error messages (empty = valid)."""
+        errors: list[str] = []
+
+        # Env vars: each non-empty, non-comment line must contain '='
+        env_buf = self._env_view.get_buffer()
+        env_text = env_buf.get_text(env_buf.get_start_iter(), env_buf.get_end_iter(), False)
+        for i, line in enumerate(env_text.splitlines(), 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "=" not in stripped:
+                errors.append(f"Env var line {i}: missing '=' (expected KEY=VALUE)")
+                break
+
+        # DLL overrides: each non-empty line must contain '='
+        dll_buf = self._dll_view.get_buffer()
+        dll_text = dll_buf.get_text(dll_buf.get_start_iter(), dll_buf.get_end_iter(), False)
+        for i, line in enumerate(dll_text.splitlines(), 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "=" not in stripped:
+                errors.append(f"DLL override line {i}: missing '=' (expected DLL_NAME=type)")
+                break
+
+        # Winetricks verbs: no special characters
+        verbs_text = self._winetricks_row.get_text().strip()
+        if verbs_text:
+            import re
+
+            for verb in verbs_text.split():
+                if not re.match(r"^[a-zA-Z0-9_\-]+$", verb):
+                    errors.append(f"Invalid winetricks verb: '{verb}'")
+                    break
+
+        return errors
 
     # ------------------------------------------------------------------
     # Helpers

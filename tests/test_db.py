@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from exwin.backend.config import Config
 from exwin.db.apps import (
     delete_app,

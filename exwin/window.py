@@ -45,7 +45,7 @@ class ExwinWindow(Adw.ApplicationWindow):
         self._runtimes = runtimes
         self._launcher = launcher
         self.set_title("exwin")
-        self.set_default_size(1100, 700)
+        self.set_default_size(config.window_width, config.window_height)
 
         # ── Root: toast overlay ─────────────────────────────────────────
         self._toast_overlay = Adw.ToastOverlay()
@@ -61,7 +61,7 @@ class ExwinWindow(Adw.ApplicationWindow):
 
         self._sidebar_toggle = Gtk.ToggleButton(
             icon_name="sidebar-show-symbolic",
-            active=True,
+            active=config.sidebar_visible,
             tooltip_text="Toggle sidebar",
         )
         header.pack_start(self._sidebar_toggle)
@@ -110,7 +110,10 @@ class ExwinWindow(Adw.ApplicationWindow):
         self._stack.set_vexpand(True)
         body.append(self._stack)
 
-        self._library_page = LibraryPage(on_app_activated=self._on_app_activated)
+        self._library_page = LibraryPage(
+            on_app_activated=self._on_app_activated,
+            on_installer_dropped=self._on_installer_dropped,
+        )
         self._stack.add_named(self._library_page, "library")
 
         self._settings_page = SettingsPage(
@@ -138,12 +141,27 @@ class ExwinWindow(Adw.ApplicationWindow):
         self._nav_list.select_row(self._nav_list.get_row_at_index(0))
         self.refresh_library()
 
+        # Responsive sidebar: auto-hide when window is narrow
+        self.connect("notify::default-width", self._on_size_changed)
+        self._on_size_changed(None, None)  # apply on init
+
     # ------------------------------------------------------------------
     # Public helpers
     # ------------------------------------------------------------------
 
+    def save_window_state(self) -> None:
+        width, height = self.get_default_size()
+        self._config.window_width = width
+        self._config.window_height = height
+        self._config.sidebar_visible = self._sidebar_toggle.get_active()
+        self._config.save()
+
     def show_toast(self, message: str) -> None:
         self._toast_overlay.add_toast(Adw.Toast(title=message))
+
+    def toggle_search(self) -> None:
+        if self._stack.get_visible_child_name() == "library":
+            self._search_toggle.set_active(not self._search_toggle.get_active())
 
     def refresh_library(self) -> None:
         apps = get_all_apps()
@@ -153,6 +171,12 @@ class ExwinWindow(Adw.ApplicationWindow):
     # ------------------------------------------------------------------
     # Signal handlers
     # ------------------------------------------------------------------
+
+    def _on_size_changed(self, _obj, _pspec) -> None:  # noqa: ANN001
+        """Auto-collapse sidebar on narrow windows (<500px)."""
+        width = self.get_width()
+        if width > 0 and width < 500:
+            self._sidebar_toggle.set_active(False)
 
     def _on_nav_row_selected(self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow | None) -> None:
         if row is None:
@@ -178,6 +202,18 @@ class ExwinWindow(Adw.ApplicationWindow):
             on_uninstall=self._uninstall_app,
             on_settings_saved=self._on_app_config_saved,
             on_paths_changed=self._on_app_paths_changed,
+            launcher=self._launcher,
+        )
+        dialog.present(self)
+
+    def _on_installer_dropped(self, exe_path) -> None:  # noqa: ANN001
+        from pathlib import Path as _Path
+
+        dialog = InstallDialog(
+            config=self._config,
+            runtimes=self._runtimes,
+            on_installed=self._on_app_installed,
+            initial_installer=_Path(str(exe_path)),
         )
         dialog.present(self)
 
@@ -255,8 +291,21 @@ class ExwinWindow(Adw.ApplicationWindow):
     def _on_app_exited(self, app_id: str) -> None:
         from datetime import datetime
 
+        from gi.repository import Gio
+
         update_last_launched(app_id, datetime.now(tz=UTC).isoformat())
         self.refresh_library()
+
+        # Desktop notification
+        from exwin.db.apps import get_app
+
+        app = get_app(app_id)
+        if app:
+            notification = Gio.Notification.new(f"{app.name} has exited")
+            notification.set_body("Game session ended.")
+            gio_app = self.get_application()
+            if gio_app:
+                gio_app.send_notification(f"app-exit-{app_id}", notification)
 
     def _uninstall_app(self, app: AppEntry, delete_files: bool) -> None:
         uninstall_app(app, self._config, delete_files)

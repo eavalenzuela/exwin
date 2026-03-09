@@ -46,11 +46,15 @@ def init_db(data_dir: Path) -> None:
     _DB_PATH = data_dir / "library.db"
     with sqlite3.connect(_DB_PATH) as conn:
         conn.executescript(_SCHEMA)
-        try:
-            conn.execute("ALTER TABLE apps ADD COLUMN playtime_seconds INTEGER DEFAULT 0")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass  # Column already exists
+        for migration in (
+            "ALTER TABLE apps ADD COLUMN playtime_seconds INTEGER DEFAULT 0",
+            "ALTER TABLE apps ADD COLUMN tags TEXT DEFAULT ''",
+        ):
+            try:
+                conn.execute(migration)
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
 
 @contextmanager

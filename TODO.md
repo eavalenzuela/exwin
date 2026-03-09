@@ -43,23 +43,20 @@
 
 ### Medium Value / Low Effort
 
-- [ ] **Keyboard shortcuts** — No shortcuts exist. Add Ctrl+F (search), Ctrl+Q (quit), Escape (close dialog) via `Gtk.ShortcutController`.
-- [ ] **Disk space display** — Show install size on AppDetailDialog. Show free space on target drive during install/migration.
-- [ ] **Desktop notification on game exit** — Fire `Gio.Notification` when a game exits (especially headless). One `send_notification()` call in `_on_app_exited`.
-- [ ] **`--version` CLI flag** — Add `parser.add_argument("--version", action="version", version=...)`.
-- [ ] **Backup retention policy** — `saves.py` creates unlimited timestamped backups. Add configurable max count (e.g., keep last 5).
-- [ ] **Automatic save path detection** — "Detect" button that scans common locations:
-  - `<prefix>/pfx/drive_c/users/steamuser/AppData/`
-  - `<prefix>/drive_c/users/*/My Documents/My Games/`
-  - Inside the install directory
+- [x] **Keyboard shortcuts** — Ctrl+F (search focus), Ctrl+Q (quit) via `Gio.SimpleAction` + `set_accels_for_action` in `app.py`.
+- [x] **Disk space display** — Install size and disk free shown on AppDetailDialog info group. Free space on target shown in migration confirmation dialog.
+- [x] **Desktop notification on game exit** — `Gio.Notification` sent in `_on_app_exited` (window.py) when a game process ends.
+- [x] **`--version` CLI flag** — `parser.add_argument("--version", ...)` using `importlib.metadata.version("exwin")`.
+- [x] **Backup retention policy** — `Config.backup_max_count` (default 5, 0=unlimited); `enforce_retention()` in `saves.py` called after every backup (UI + CLI). SpinRow in SettingsPage.
+- [x] **Automatic save path detection** — "Detect" button in AppSettingsDialog scans Wine prefix user dirs (AppData, Documents/My Games, Saved Games) and install dir for save/saves subdirs. `backend/save_detect.py`.
 
 ### Lower Priority / Bigger Scope
 
-- [ ] **Library categories/tags** — `tags` column in DB + tag editor in AppDetailDialog + filter dropdown in library header.
-- [ ] **Install progress bar** — Parse `innoextract` file count output for a percentage estimate instead of unbounded log scroll.
-- [ ] **Drag-and-drop installer** — Allow dropping `.exe` onto library page to start install flow.
-- [ ] **Window state persistence** — Save window size, sidebar visibility, search state across sessions.
-- [ ] **Flatpak-aware runtime detection** — `runtime.py` only scans `~/.steam/root/`. Under Flatpak, Steam lives at `~/.var/app/com.valvesoftware.Steam/...`.
+- [x] **Library categories/tags** — `tags` TEXT column in DB (comma-separated), `tag_list` property on AppEntry, tag editor (EntryRow + save button) in AppDetailDialog, tag filter dropdown in LibraryPage header. `update_tags()` and `get_all_tags()` in db/apps.py.
+- [x] **Install progress bar** — `count_files()` in `gog_installer.py` pre-counts files via `innoextract --list`. `Gtk.ProgressBar` on installing page shows `current / total files`. Progress callback threaded through `install_worker.py` → `install_dialog.py`.
+- [x] **Drag-and-drop installer** — `Gtk.DropTarget` on LibraryPage accepts `.exe` files. Dropped file opens `InstallDialog` with `initial_installer` param, auto-starts probing.
+- [x] **Window state persistence** — `Config.window_width/height/sidebar_visible` saved to `[window]` TOML table. Loaded on window creation, saved on `close-request` via `save_window_state()`.
+- [x] **Flatpak-aware runtime detection** — `runtime.py` now scans `~/.var/app/com.valvesoftware.Steam/data/Steam/{steamapps/common,compatibilitytools.d}` in addition to native Steam paths.
 - [ ] **Import Lutris/Heroic/Bottles configs** — Parse existing launcher databases and import games as library entries.
 - [ ] **Controller/gamepad navigation** — Gamepad-friendly UI navigation for couch use.
 - [ ] **Plugin/hook system** — Custom pre/post install scripts per game.
@@ -68,14 +65,14 @@
 
 ## UI / UX
 
-- [ ] **No input validation on text fields** — AppSettingsDialog env vars/DLL overrides accept invalid KEY=VALUE; winetricks verbs not checked; storage_root path not validated writable.
-- [ ] **No unsaved changes warning** — AppSettingsDialog can be closed without saving; no confirmation dialog.
-- [ ] **Dialog sizing on small screens** — AppDetailDialog (440x560) and AppSettingsDialog (520x720) are too tall for 1024x768. Make dialogs adaptive.
-- [ ] **Sidebar not responsive** — Fixed 180px width; unusable on narrow windows (<500px).
-- [ ] **No step indicator in install wizard** — InstallDialog has multiple pages but no visible "Step 2 of 5" indicator.
-- [ ] **Missing accessibility** — No mnemonics (Alt+Key), no focus management after page transitions, no accessible names on cover images.
-- [ ] **Exe selection skipped** — `_on_wine_installer_done` goes straight to `pick_best_exe()` finalize. If best guess is wrong, user has no recourse during install. Should always show exe selection when >1 candidate.
-- [ ] **AppDetailDialog doesn't refresh live** — Holds a snapshot of `is_running`; doesn't update if app launched/stopped from elsewhere.
+- [x] **No input validation on text fields** — `_validate()` in AppSettingsDialog checks env vars and DLL overrides for KEY=VALUE format, winetricks verbs for valid characters. Toast shown on first error.
+- [x] **No unsaved changes warning** — AppSettingsDialog tracks dirty state via `_snapshot()`; `close-attempt` handler shows discard confirmation if fields changed.
+- [x] **Dialog sizing on small screens** — Removed hardcoded `content_height` from AppDetailDialog and AppSettingsDialog; dialogs now size to content.
+- [x] **Sidebar not responsive** — Sidebar auto-collapses when window width < 500px via `notify::default-width` handler.
+- [x] **No step indicator in install wizard** — `_set_step()` helper updates `Adw.WindowTitle` subtitle with "Step N of 4" at each page transition.
+- [x] **Missing accessibility** — Added `Gtk.AccessibleProperty.LABEL` on cover art images in both library cards and detail dialog.
+- [x] **Exe selection skipped** — `_on_wine_installer_done` now shows exe selection page when >1 candidate found, with best guess pre-selected.
+- [x] **AppDetailDialog doesn't refresh live** — `GLib.timeout_add_seconds(2)` polls `launcher.is_running()` and updates running indicator, primary button, and uninstall sensitivity.
 
 ---
 
@@ -83,21 +80,21 @@
 
 ### Critical (untested core paths)
 
-- [ ] **`gog_installer.py`** — probe, extract, parse_game_info, find_primary_exe, guess_exe, validate_checksums, find_sibling_parts. Mock innoextract subprocess.
-- [ ] **`install_worker.py`** — Full install_gog() pipeline, install_gog_dlc(). Integration tests with mocked installer.
-- [ ] **`launcher.py`** — Process spawn, daemon thread cleanup, env building, GPU selection, GLib.idle_add callback.
-- [ ] **`runtime.py`** — scan_runtimes() filesystem scanning, _read_proton_version, _read_wine_version. Mock filesystem.
-- [ ] **`prefix.py`** — create_prefix (wineboot subprocess), delete_prefix, wineprefix_path for Proton vs Wine.
+- [x] **`gog_installer.py`** — 22 tests: _parse_info_output, find_primary_exe, guess_exe, parse_game_info, find_sibling_parts, validate_checksums, app_id_from_info, find_cover_art.
+- [x] **`install_worker.py`** — 3 tests: full install_gog pipeline with mocked innoextract/extract, already-installed check, install_gog_dlc.
+- [x] **`launcher.py`** — 11 tests: build_command (Proton/Wine/args/gamemode/mangohud/missing exe), build_env (Proton/Wine/arch/DLL/GPU/user env), lifecycle.
+- [x] **`runtime.py`** — 10 tests: Runtime dataclass, _read_proton_version, _read_wine_version, scan_runtimes (Proton dirs, system Wine, dedup).
+- [x] **`prefix.py`** — 8 tests: prefix_root, wineprefix_path (Proton pfx/ vs Wine root), create_prefix (Proton/Wine/arch), delete_prefix.
 
 ### Important (untested supporting modules)
 
-- [ ] **`generic_installer.py`** — detect_installer_type, scan_candidate_exes, pick_best_exe, finalize_generic_install.
-- [ ] **`winetricks.py`** — run_verbs env setup (Proton vs Wine paths), is_available.
-- [ ] **`gpu.py`** — detect_gpus, _parse_lspci. Mock /sys/class/drm and lspci output.
-- [ ] **`dxvk.py`** — install_dxvk, install_vkd3d. Mock winetricks and GitHub API.
-- [ ] **`proton_ge.py`** — get_latest_release, download_and_install. Mock GitHub API.
-- [ ] **`tray.py`** — TrayIcon start/stop, DBus method handlers. Mock Gio.DBus.
-- [ ] **`db/runtimes.py`** — upsert_runtime, sync_runtimes.
+- [x] **`generic_installer.py`** — 11 tests: detect_installer_type, scan_candidate_exes (skip dirs/exes, Proton layout), pick_best_exe, _slugify_app_id.
+- [x] **`winetricks.py`** — 7 tests: is_available, run_verbs (Wine/Proton env setup, unattended flag, error cases).
+- [x] **`gpu.py`** — 7 tests: _is_gpu_class, _parse_lspci (GPU/audio/timeout/last stanza), GPU dataclass, vendor map.
+- [x] **`dxvk.py`** — 8 tests: install_dxvk (winetricks calls, error, progress), _find_tarball_asset, _find_setup_script, install_vkd3d (fallback).
+- [x] **`proton_ge.py`** — 5 tests: find_ge_proton_asset (tar.gz/sha512/missing), is_installed, download_and_install (progress, already installed).
+- [x] **`tray.py`** — 14 tests: TrayIcon construction, SNI properties (Id/Category/Title/Icon/Menu/unknown), menu properties, layout, method calls (Activate/SecondaryActivate), start failure.
+- [x] **`db/runtimes.py`** — 9 tests: upsert_runtime (insert/update/different paths), get_runtime, get_all_runtimes, sync_runtimes (idempotent, preserves fields).
 
 ### Dev Tooling
 

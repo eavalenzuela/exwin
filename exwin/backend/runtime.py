@@ -10,11 +10,15 @@ from pathlib import Path
 
 # Canonical scan roots — ~/.steam/root is a distro-agnostic symlink to the
 # actual Steam installation (debian-installation, steam, etc.)
+_FLATPAK_STEAM = Path.home() / ".var" / "app" / "com.valvesoftware.Steam" / "data" / "Steam"
 _PROTON_SCAN_ROOTS: list[Path] = [
     Path.home() / ".steam" / "root" / "steamapps" / "common",
     Path.home() / ".steam" / "root" / "compatibilitytools.d",
     Path.home() / ".local" / "share" / "Steam" / "steamapps" / "common",
     Path.home() / ".local" / "share" / "Steam" / "compatibilitytools.d",
+    # Flatpak Steam installation
+    _FLATPAK_STEAM / "steamapps" / "common",
+    _FLATPAK_STEAM / "compatibilitytools.d",
 ]
 
 

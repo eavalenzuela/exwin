@@ -66,15 +66,38 @@ def find_rar_tool() -> str | None:
     return None
 
 
+def count_files(installer_path: Path) -> int:
+    """Count the number of files in the installer via innoextract --list.
+
+    Returns 0 if counting fails (progress will fall back to unbounded).
+    """
+    binary = find_innoextract()
+    try:
+        result = subprocess.run(
+            [binary, "--list", "--gog", str(installer_path)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        # Each extractable file has a line starting with " - "
+        return sum(1 for line in result.stdout.splitlines() if line.startswith(" - "))
+    except Exception:
+        return 0
+
+
 def extract(
     installer_path: Path,
     output_dir: Path,
     on_progress: Callable[[str], None] | None = None,
+    on_file_progress: Callable[[int, int], None] | None = None,
 ) -> None:
     """Extract the installer contents to output_dir, streaming progress lines.
 
     Passes --gog so innoextract also processes GOG-specific RAR-format .bin
     part files (requires unrar or unar on PATH).
+
+    If *on_file_progress* is set and *total* was pre-counted, it is called
+    with ``(current_file_number, total_files)`` for each extracted file.
     """
     binary = find_innoextract()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -87,10 +110,18 @@ def extract(
     )
 
     assert proc.stdout is not None
+    file_count = 0
     for line in proc.stdout:
         line = line.strip()
-        if line and on_progress:
+        if not line:
+            continue
+        if on_progress:
             on_progress(line)
+        # innoextract prints "Extracting ..." for each file
+        if line.startswith("Extracting") or line.startswith(" - "):
+            file_count += 1
+            if on_file_progress:
+                on_file_progress(file_count, 0)
 
     proc.wait()
     if proc.returncode != 0:

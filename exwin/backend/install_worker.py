@@ -12,6 +12,7 @@ from exwin.backend.config import Config
 from exwin.backend.dxvk import install_dxvk, install_vkd3d
 from exwin.backend.gog_installer import (
     app_id_from_info,
+    count_files,
     extract,
     find_cover_art,
     find_primary_exe,
@@ -38,6 +39,7 @@ def install_gog(
     dxvk: bool = False,
     vkd3d: bool = False,
     on_progress: Callable[[str], None] | None = None,
+    on_file_progress: Callable[[int, int], None] | None = None,
 ) -> AppEntry:
     """Full GOG install pipeline.  Intended to run in a background thread.
 
@@ -76,9 +78,18 @@ def install_gog(
         )
 
     # ── 2. Extract ───────────────────────────────────────────────────────
-    _log(f"Extracting to {install_dir} …")
+    total_files = count_files(installer_path)
+    if total_files:
+        _log(f"Extracting {total_files} files to {install_dir} …")
+    else:
+        _log(f"Extracting to {install_dir} …")
+
+    def _file_progress(current: int, _total: int) -> None:
+        if on_file_progress and total_files:
+            on_file_progress(current, total_files)
+
     try:
-        extract(installer_path, install_dir, on_progress=_log)
+        extract(installer_path, install_dir, on_progress=_log, on_file_progress=_file_progress)
     except Exception as exc:
         shutil.rmtree(install_dir, ignore_errors=True)
         raise RuntimeError(f"Extraction failed: {exc}") from exc

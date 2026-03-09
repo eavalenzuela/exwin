@@ -46,6 +46,18 @@ def restore_saves(backup_path: Path, app_config: AppConfig) -> None:
         zf.extractall(dest)
 
 
+def enforce_retention(app_id: str, config: Config) -> list[Path]:
+    """Delete excess backups beyond config.backup_max_count. Returns deleted paths."""
+    if config.backup_max_count <= 0:
+        return []
+    backups = list_backups(app_id, config)
+    removed: list[Path] = []
+    for old in backups[config.backup_max_count :]:
+        old.unlink(missing_ok=True)
+        removed.append(old)
+    return removed
+
+
 def list_backups(app_id: str, config: Config) -> list[Path]:
     """Return sorted list (newest first) of backup zips."""
     dest_dir = _backups_dir(app_id, config)

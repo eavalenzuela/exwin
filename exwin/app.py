@@ -44,6 +44,23 @@ class ExwinApp(Adw.Application):
         self.launcher = Launcher(self.config)
         self._tray: TrayIcon | None = None
 
+        # Keyboard shortcuts
+        self.set_accels_for_action("app.quit", ["<Control>q"])
+        self.set_accels_for_action("app.search", ["<Control>f"])
+
+        quit_action = Gio.SimpleAction.new("quit", None)
+        quit_action.connect("activate", lambda *_: self.quit())
+        self.add_action(quit_action)
+
+        search_action = Gio.SimpleAction.new("search", None)
+        search_action.connect("activate", self._on_search_accel)
+        self.add_action(search_action)
+
+    def _on_search_accel(self, _action: Gio.SimpleAction, _param) -> None:  # noqa: ANN001
+        win = self.props.active_window
+        if win and hasattr(win, "toggle_search"):
+            win.toggle_search()
+
     def do_activate(self) -> None:
         win = self.props.active_window
         if not win:
@@ -65,6 +82,8 @@ class ExwinApp(Adw.Application):
         win.present()
 
     def _on_close_request(self, win) -> bool:  # noqa: ANN001
+        if hasattr(win, "save_window_state"):
+            win.save_window_state()
         if self._tray is not None and self._tray.running:
             win.set_visible(False)
             return True  # suppress default destroy
