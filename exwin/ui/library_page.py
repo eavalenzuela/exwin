@@ -17,6 +17,17 @@ from exwin.models import AppEntry  # noqa: E402
 # Width of each card in the flow grid
 _CARD_WIDTH = 160
 
+# Sort options: (label, key function)
+_SORT_OPTIONS = [
+    ("Name", lambda a: a.name.lower()),
+    ("Last Played", lambda a: a.last_launched or ""),
+    ("Play Time", lambda a: a.playtime_seconds),
+    ("Install Date", lambda a: a.install_date or ""),
+]
+
+# Source filter options
+_SOURCE_FILTERS = ["All", "GOG", "Manual"]
+
 
 def _fmt_playtime(seconds: int) -> str:
     if seconds < 60:
@@ -31,6 +42,9 @@ class LibraryPage(Gtk.Box):
     def __init__(self, on_app_activated: Callable[[AppEntry], None]) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._on_app_activated = on_app_activated
+        self._sort_index = 0
+        self._sort_descending = False
+        self._source_filter = "All"
 
         # ── Search bar ──────────────────────────────────────────────────
         self._search_entry = Gtk.SearchEntry(placeholder_text="Search library…")
@@ -40,6 +54,43 @@ class LibraryPage(Gtk.Box):
         self.search_bar.set_child(self._search_entry)
         self.search_bar.connect_entry(self._search_entry)
         self.append(self.search_bar)
+
+        # ── Sort / filter bar ───────────────────────────────────────────
+        controls_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+            margin_start=16,
+            margin_end=16,
+            margin_top=8,
+            margin_bottom=0,
+        )
+        self.append(controls_box)
+
+        # Sort dropdown
+        sort_model = Gtk.StringList()
+        for label, _ in _SORT_OPTIONS:
+            sort_model.append(label)
+        self._sort_dropdown = Gtk.DropDown(model=sort_model)
+        self._sort_dropdown.set_tooltip_text("Sort by")
+        self._sort_dropdown.connect("notify::selected", self._on_sort_changed)
+        controls_box.append(Gtk.Label(label="Sort:"))
+        controls_box.append(self._sort_dropdown)
+
+        # Sort direction toggle
+        self._sort_dir_btn = Gtk.ToggleButton(icon_name="view-sort-ascending-symbolic")
+        self._sort_dir_btn.set_tooltip_text("Toggle sort direction")
+        self._sort_dir_btn.connect("toggled", self._on_sort_dir_toggled)
+        controls_box.append(self._sort_dir_btn)
+
+        # Source filter dropdown
+        filter_model = Gtk.StringList()
+        for label in _SOURCE_FILTERS:
+            filter_model.append(label)
+        self._filter_dropdown = Gtk.DropDown(model=filter_model)
+        self._filter_dropdown.set_tooltip_text("Filter by source")
+        self._filter_dropdown.connect("notify::selected", self._on_filter_changed)
+        controls_box.append(Gtk.Label(label="Source:"))
+        controls_box.append(self._filter_dropdown)
 
         # ── Content stack (empty state / grid) ──────────────────────────
         self._stack = Gtk.Stack()
@@ -82,13 +133,9 @@ class LibraryPage(Gtk.Box):
 
     def populate(self, apps: list[AppEntry], running_ids: frozenset[str] = frozenset()) -> None:
         """Replace the current card set with the given app list."""
-        while (child := self._flow_box.get_first_child()) is not None:
-            self._flow_box.remove(child)
-
-        for app in apps:
-            self._flow_box.append(_AppCard(app, is_running=app.app_id in running_ids))
-
-        self._stack.set_visible_child_name("grid" if apps else "empty")
+        self._apps = list(apps)
+        self._running_ids = running_ids
+        self._rebuild_grid()
 
     def toggle_search(self) -> None:
         self.search_bar.set_search_mode(not self.search_bar.get_search_mode())
@@ -96,6 +143,35 @@ class LibraryPage(Gtk.Box):
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _rebuild_grid(self) -> None:
+        """Re-sort, filter, and repopulate the FlowBox."""
+        while (child := self._flow_box.get_first_child()) is not None:
+            self._flow_box.remove(child)
+
+        # Apply source filter
+        apps = self._apps
+        if self._source_filter != "All":
+            source_key = self._source_filter.lower()
+            apps = [a for a in apps if a.source == source_key]
+
+        # Apply sort
+        _, key_fn = _SORT_OPTIONS[self._sort_index]
+        # Name sorts ascending by default; date/playtime sort descending by default
+        reverse = self._sort_descending
+        if self._sort_index == 0:
+            # Name: ascending natural, toggle reverses
+            pass
+        else:
+            # Date/playtime: descending natural (most recent/highest first)
+            reverse = not reverse
+        apps = sorted(apps, key=key_fn, reverse=reverse)
+
+        for app in apps:
+            self._flow_box.append(_AppCard(app, is_running=app.app_id in self._running_ids))
+
+        self._stack.set_visible_child_name("grid" if apps else "empty")
+        self._flow_box.invalidate_filter()
 
     def _filter_func(self, child: Gtk.FlowBoxChild) -> bool:
         query = self._search_entry.get_text().lower().strip()
@@ -108,6 +184,27 @@ class LibraryPage(Gtk.Box):
 
     def _on_search_changed(self, _entry: Gtk.SearchEntry) -> None:
         self._flow_box.invalidate_filter()
+
+    def _on_sort_changed(self, dropdown: Gtk.DropDown, _param) -> None:
+        self._sort_index = dropdown.get_selected()
+        if hasattr(self, "_apps"):
+            self._rebuild_grid()
+
+    def _on_sort_dir_toggled(self, btn: Gtk.ToggleButton) -> None:
+        self._sort_descending = btn.get_active()
+        btn.set_icon_name(
+            "view-sort-descending-symbolic"
+            if self._sort_descending
+            else "view-sort-ascending-symbolic"
+        )
+        if hasattr(self, "_apps"):
+            self._rebuild_grid()
+
+    def _on_filter_changed(self, dropdown: Gtk.DropDown, _param) -> None:
+        idx = dropdown.get_selected()
+        self._source_filter = _SOURCE_FILTERS[idx]
+        if hasattr(self, "_apps"):
+            self._rebuild_grid()
 
     def _on_child_activated(self, _fb: Gtk.FlowBox, child: Gtk.FlowBoxChild) -> None:
         card = child.get_child()

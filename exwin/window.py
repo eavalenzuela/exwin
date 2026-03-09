@@ -19,6 +19,7 @@ from exwin.backend.uninstall import uninstall_app  # noqa: E402
 from exwin.db.apps import get_all_apps, update_last_launched  # noqa: E402
 from exwin.db.runtimes import get_runtime  # noqa: E402
 from exwin.models import AppEntry  # noqa: E402
+from exwin.ui.add_existing_dialog import AddExistingDialog  # noqa: E402
 from exwin.ui.app_detail_dialog import AppDetailDialog  # noqa: E402
 from exwin.ui.install_dialog import InstallDialog  # noqa: E402
 from exwin.ui.library_page import LibraryPage  # noqa: E402
@@ -75,6 +76,13 @@ class ExwinWindow(Adw.ApplicationWindow):
         install_btn.add_css_class("suggested-action")
         install_btn.connect("clicked", self._on_install_clicked)
         header.pack_end(install_btn)
+
+        add_existing_btn = Gtk.Button(
+            icon_name="list-add-symbolic",
+            tooltip_text="Add an already-installed game",
+        )
+        add_existing_btn.connect("clicked", self._on_add_existing_clicked)
+        header.pack_end(add_existing_btn)
 
         # ── Body: sidebar + separator + content ─────────────────────────
         body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -178,6 +186,14 @@ class ExwinWindow(Adw.ApplicationWindow):
             config=self._config,
             runtimes=self._runtimes,
             on_installed=self._on_app_installed,
+        )
+        dialog.present(self)
+
+    def _on_add_existing_clicked(self, _btn: Gtk.Button) -> None:
+        dialog = AddExistingDialog(
+            config=self._config,
+            runtimes=self._runtimes,
+            on_added=self._on_app_installed,
         )
         dialog.present(self)
 

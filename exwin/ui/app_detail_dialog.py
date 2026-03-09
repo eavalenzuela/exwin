@@ -178,6 +178,15 @@ class AppDetailDialog(Adw.Dialog):
                 restore_btn.connect("clicked", self._on_restore_saves)
                 btn_box.append(restore_btn)
 
+        # Log viewer button
+        log_path = config.logs_dir / f"{app.app_id}.log"
+        if log_path.exists():
+            log_btn = Gtk.Button(label="View Log")
+            log_btn.add_css_class("flat")
+            log_btn.set_tooltip_text("View application log output")
+            log_btn.connect("clicked", self._on_view_log)
+            btn_box.append(log_btn)
+
         if is_running:
             primary_btn = Gtk.Button(label="Stop")
             primary_btn.add_css_class("destructive-action")
@@ -189,6 +198,41 @@ class AppDetailDialog(Adw.Dialog):
             primary_btn.add_css_class("pill")
             primary_btn.connect("clicked", self._on_launch_clicked)
         btn_box.append(primary_btn)
+
+        # Wine prefix tools
+        if app.prefix_path and runtime:
+            tools_group = Adw.PreferencesGroup(title="Prefix Tools")
+            content.append(tools_group)
+
+            tools_row = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL,
+                spacing=8,
+                halign=Gtk.Align.CENTER,
+                margin_top=4,
+                margin_bottom=4,
+            )
+            tools_wrapper = Adw.ActionRow(title="Wine tools for this prefix")
+            tools_wrapper.add_suffix(tools_row)
+            tools_group.add(tools_wrapper)
+
+            winecfg_btn = Gtk.Button(label="winecfg")
+            winecfg_btn.add_css_class("flat")
+            winecfg_btn.set_tooltip_text("Open Wine configuration for this prefix")
+            winecfg_btn.connect("clicked", self._on_winecfg)
+            tools_row.append(winecfg_btn)
+
+            regedit_btn = Gtk.Button(label="regedit")
+            regedit_btn.add_css_class("flat")
+            regedit_btn.set_tooltip_text("Open Wine registry editor for this prefix")
+            regedit_btn.connect("clicked", self._on_regedit)
+            tools_row.append(regedit_btn)
+
+            kill_btn = Gtk.Button(label="Kill Prefix")
+            kill_btn.add_css_class("flat")
+            kill_btn.add_css_class("destructive-action")
+            kill_btn.set_tooltip_text("Kill all processes in this Wine prefix")
+            kill_btn.connect("clicked", self._on_kill_prefix)
+            tools_row.append(kill_btn)
 
         uninstall_btn = Gtk.Button(label="Uninstall")
         uninstall_btn.add_css_class("destructive-action")
@@ -350,6 +394,46 @@ class AppDetailDialog(Adw.Dialog):
             GLib.idle_add(self._show_toast_and_reenable, msg, _btn)
 
         threading.Thread(target=_work, daemon=True).start()
+
+    def _on_view_log(self, _btn: Gtk.Button) -> None:
+        from exwin.ui.log_viewer_dialog import LogViewerDialog
+
+        log_path = self._config.logs_dir / f"{self._app.app_id}.log"
+        dialog = LogViewerDialog(app_name=self._app.name, log_path=log_path)
+        dialog.present(self)
+
+    def _on_winecfg(self, _btn: Gtk.Button) -> None:
+        from exwin.backend.prefix_tools import run_winecfg
+
+        if self._app.prefix_path and self._runtime:
+            try:
+                run_winecfg(self._app.prefix_path, self._runtime)
+            except Exception as exc:
+                self._show_toast(f"winecfg failed: {exc}")
+
+    def _on_regedit(self, _btn: Gtk.Button) -> None:
+        from exwin.backend.prefix_tools import run_regedit
+
+        if self._app.prefix_path and self._runtime:
+            try:
+                run_regedit(self._app.prefix_path, self._runtime)
+            except Exception as exc:
+                self._show_toast(f"regedit failed: {exc}")
+
+    def _on_kill_prefix(self, _btn: Gtk.Button) -> None:
+        from exwin.backend.prefix_tools import kill_prefix
+
+        if self._app.prefix_path and self._runtime:
+            try:
+                kill_prefix(self._app.prefix_path, self._runtime)
+                self._show_toast("Prefix processes killed")
+            except Exception as exc:
+                self._show_toast(f"Kill prefix failed: {exc}")
+
+    def _show_toast(self, msg: str) -> None:
+        root = self.get_root()
+        if hasattr(root, "show_toast"):
+            root.show_toast(msg)
 
     def _show_toast_and_reenable(self, msg: str, btn: Gtk.Button) -> None:
         btn.set_sensitive(True)

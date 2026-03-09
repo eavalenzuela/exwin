@@ -36,14 +36,10 @@
 ### High Value / Moderate Effort
 
 - [x] **Per-app runtime selection in UI** — AppSettingsDialog now has a Runtime ComboRow; saves to DB via `update_runtime()`.
-- [ ] **Library sorting & filtering** — Grid only supports name search. Add sort dropdown (name, last played, playtime, install date) and source filter (All/GOG/Manual).
-- [ ] **"Add Existing Game" flow** — Register an already-installed game without re-running an installer. Dialog: pick directory + pick exe + pick runtime → create prefix reference + DB entry.
-- [ ] **Log viewer** — Logs go to `~/.exwin/logs/<app_id>.log` but aren't accessible from GUI. Add "View Log" button in AppDetailDialog.
-- [ ] **Wine prefix tools** — Buttons in AppDetailDialog/AppSettingsDialog for:
-  - Run winecfg (with correct WINEPREFIX)
-  - Run regedit
-  - Kill prefix processes (`wineserver -k`)
-  - Quick winetricks verb entry
+- [x] **Library sorting & filtering** — Sort dropdown (name, last played, playtime, install date), ascending/descending toggle, and source filter (All/GOG/Manual) added to LibraryPage.
+- [x] **"Add Existing Game" flow** — AddExistingDialog: pick directory + pick exe + pick runtime → create prefix + DB entry. "+" button in window header.
+- [x] **Log viewer** — LogViewerDialog: monospace scrollable text view. "View Log" button in AppDetailDialog (shown when log file exists).
+- [x] **Wine prefix tools** — Prefix Tools group in AppDetailDialog with winecfg, regedit, Kill Prefix buttons. Backend `prefix_tools.py` handles env setup for both Proton and Wine.
 
 ### Medium Value / Low Effort
 
