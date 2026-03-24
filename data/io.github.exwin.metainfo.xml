@@ -34,6 +34,17 @@
   <launchable type="desktop-id">io.github.exwin.desktop</launchable>
 
   <releases>
+    <release version="0.3.0" date="2026-03-24">
+      <description>
+        <p>UI/UX fixes and quality improvements: dialog sizing, visual test coverage, install dialog refactoring.</p>
+        <ul>
+          <li>Fix collapsed dialog issue — add content_height to AppDetailDialog, InstallDialog, AppSettingsDialog, and ProtonGEDialog</li>
+          <li>Install dialog pages extracted to install_pages.py module</li>
+          <li>Visual UI test scaffold (20 automated tests) validating dialog sizing, widget tree layout, and cross-dialog consistency</li>
+          <li>Screenshot harness for automated visual regression testing under Xvfb</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-03-01">
       <description>
         <p>Feature update adding system tray icon, GOG checksum validation, play time tracking, save file backup, CLI interface, GPU selection, global storage root, and metadata cleanup on uninstall.</p>

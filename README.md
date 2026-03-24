@@ -1,5 +1,7 @@
 # exwin
 
+**v0.3.0**
+
 Offline-first Windows software/game manager for Linux — "offline Steam" with a Proton/Wine backend and first-class GOG offline installer automation.
 
 ## Features
@@ -31,6 +33,27 @@ python -m venv --system-site-packages .venv   # system-site-packages needed for 
 .venv/bin/pip install -e .
 .venv/bin/python -m exwin
 ```
+
+## Changelog
+
+### v0.3.0 (2026-03-24)
+- Fix collapsed dialog issue — add `content_height` to AppDetailDialog, InstallDialog, AppSettingsDialog, and ProtonGEDialog
+- Install dialog pages extracted to `install_pages.py` module
+- Visual UI test scaffold (20 automated tests) validating dialog sizing, widget tree layout, and cross-dialog consistency
+- Screenshot harness for automated visual regression testing under Xvfb
+
+### v0.2.0 (2026-03-01)
+- System tray icon via StatusNotifierItem (DBus) — close to tray, restore on click
+- GOG installer checksum validation from `.hashdb` sidecar before extraction
+- Play time tracking per game, displayed on library cards and detail view
+- Save file backup and restore with per-app save path configuration
+- CLI subcommands: `list`, `launch`, `remove`, `migrate`, `backup-saves`, `restore-saves`
+- GPU selection per app (`DRI_PRIME` / `DXVK_FILTER_DEVICE_NAME`)
+- Global storage root to redirect game files and prefixes to an external drive
+- Metadata and config directory cleanup on uninstall
+
+### v0.1.0 (2026-03-01)
+- Initial release with full GOG offline installer automation, Proton/Wine backend, and GTK4/libadwaita UI
 
 ## Data layout
 

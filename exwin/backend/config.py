@@ -5,12 +5,15 @@ Default data directory: ~/.exwin/
 
 from __future__ import annotations
 
+import logging
 import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import tomli_w
+
+_log = logging.getLogger(__name__)
 
 _DEFAULT_DATA_DIR = Path.home() / ".exwin"
 _CONFIG_FILENAME = "config.toml"
@@ -38,6 +41,11 @@ class Config:
     # ------------------------------------------------------------------ #
     # Derived paths (not stored; computed from data_dir)
     # ------------------------------------------------------------------ #
+
+    @property
+    def storage_root_available(self) -> bool:
+        """True if storage_root is not set, or is set and writable."""
+        return getattr(self, "_storage_root_available", True)
 
     @property
     def config_path(self) -> Path:
@@ -143,9 +151,20 @@ class Config:
             self.logs_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)
-        # Storage-root dirs may be on an external drive; skip gracefully if unavailable
-        for d in (self.installs_dir, self.prefixes_dir):
-            try:
+        # Storage-root dirs may be on an external drive; warn if unavailable
+        self._storage_root_available = True
+        if self.storage_root is not None:
+            for d in (self.installs_dir, self.prefixes_dir):
+                try:
+                    d.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    self._storage_root_available = False
+                    _log.warning(
+                        "Storage root directory '%s' is not writable — "
+                        "external drive may be unmounted. Installs and launches "
+                        "that depend on it will fail.",
+                        d,
+                    )
+        else:
+            for d in (self.installs_dir, self.prefixes_dir):
                 d.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                pass

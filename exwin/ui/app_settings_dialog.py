@@ -37,7 +37,7 @@ class AppSettingsDialog(Adw.Dialog):
         runtimes: list[Runtime] | None = None,
         **kwargs,
     ) -> None:
-        super().__init__(title=f"{app.name} — Settings", content_width=520, **kwargs)
+        super().__init__(title=f"{app.name} — Settings", content_width=520, content_height=560, **kwargs)
         self._app = app
         self._app_config = app_config
         self._config = config

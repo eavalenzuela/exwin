@@ -46,7 +46,7 @@ class AppDetailDialog(Adw.Dialog):
         launcher=None,  # noqa: ANN001
         **kwargs,
     ) -> None:
-        super().__init__(title=app.name, content_width=440, **kwargs)
+        super().__init__(title=app.name, content_width=440, content_height=560, **kwargs)
         self._app = app
         self._config = config
         self._runtime = runtime

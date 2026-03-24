@@ -111,13 +111,18 @@ class Launcher:
         on_exit: Callable[[str], None] | None,
         start_time: float,
     ) -> None:
-        proc.wait()
-        elapsed = int(time.monotonic() - start_time)
-        log_file.close()
+        try:
+            proc.wait()
+            elapsed = int(time.monotonic() - start_time)
+        except Exception:
+            elapsed = int(time.monotonic() - start_time)
+            raise
+        finally:
+            log_file.close()
+            # Guard against double-cleanup if stop() races with natural exit
+            with self._lock:
+                was_tracked = self._running.pop(app_id, None) is not None
 
-        # Guard against double-cleanup if stop() races with natural exit
-        with self._lock:
-            was_tracked = self._running.pop(app_id, None) is not None
         if not was_tracked:
             return
 

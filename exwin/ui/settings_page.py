@@ -53,6 +53,16 @@ class SettingsPage(Adw.PreferencesPage):
         dir_row.add_suffix(open_btn)
         general.add(dir_row)
 
+        # Storage root availability warning
+        if config.storage_root and not config.storage_root_available:
+            self._storage_warn_banner = Adw.Banner(
+                title="Storage root is not accessible — external drive may be unmounted. "
+                "Installs and launches that depend on it will fail.",
+                button_label="",
+            )
+            self._storage_warn_banner.set_revealed(True)
+            general.add(self._storage_warn_banner)
+
         # Games storage root (covers both installs and prefixes)
         prefix_row = Adw.EntryRow(title="Games Storage Directory")
         prefix_row.set_text(str(config.storage_root) if config.storage_root else "")

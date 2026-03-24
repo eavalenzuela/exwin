@@ -11,6 +11,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Pre-compiled patterns used in _parse_info_output (called per-line)
+_RE_INSPECTING = re.compile(r'Inspecting "(.+?)"')
+_RE_DATA_VERSION = re.compile(r"setup data version ([\d.]+)")
+_RE_GAME_ID = re.compile(r"GOG\.com game ID is (\d+)")
+_RE_LANGUAGE = re.compile(r"\s+-\s+([a-z]{2}-[A-Z]{2})")
+
+# Pattern used in guess_exe and app_id_from_info
+_RE_NON_WORD = re.compile(r"\W+")
+
 
 @dataclass
 class InstallerInfo:
@@ -173,9 +182,9 @@ def guess_exe(install_dir: Path, hint: str = "") -> str | None:
 
     # Prefer an exe whose stem fuzzy-matches the game title hint
     if hint:
-        hint_slug = re.sub(r"\W+", "", hint.lower())
+        hint_slug = _RE_NON_WORD.sub("", hint.lower())
         for exe in pool:
-            if re.sub(r"\W+", "", exe.stem.lower()) in hint_slug:
+            if _RE_NON_WORD.sub("", exe.stem.lower()) in hint_slug:
                 return str(exe.relative_to(install_dir))
 
     return str(pool[0].relative_to(install_dir))
@@ -265,7 +274,7 @@ def app_id_from_info(info: InstallerInfo) -> str:
     if info.game_id:
         return f"gog-{info.game_id}"
     # Fallback: slugify the title
-    slug = re.sub(r"\W+", "-", info.title.lower()).strip("-")
+    slug = _RE_NON_WORD.sub("-", info.title.lower()).strip("-")
     return f"gog-{slug}"
 
 
@@ -281,19 +290,19 @@ def _parse_info_output(output: str, installer_path: Path) -> InstallerInfo:
     languages: list[str] = []
 
     for line in output.splitlines():
-        m = re.match(r'Inspecting "(.+?)"', line)
+        m = _RE_INSPECTING.match(line)
         if m:
             title = m.group(1)
 
-        m = re.search(r"setup data version ([\d.]+)", line)
+        m = _RE_DATA_VERSION.search(line)
         if m:
             setup_version = m.group(1)
 
-        m = re.match(r"GOG\.com game ID is (\d+)", line.strip())
+        m = _RE_GAME_ID.match(line.strip())
         if m:
             game_id = m.group(1)
 
-        m = re.match(r"\s+-\s+([a-z]{2}-[A-Z]{2})", line)
+        m = _RE_LANGUAGE.match(line)
         if m:
             languages.append(m.group(1))
 

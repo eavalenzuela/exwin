@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -23,18 +24,25 @@ from exwin.backend.generic_installer import (  # noqa: E402
 )
 from exwin.backend.gog_installer import (  # noqa: E402
     app_id_from_info,
-    find_innoextract,
     find_rar_tool,
     find_sibling_parts,
     probe,
 )
 from exwin.backend.install_worker import install_gog, install_gog_dlc  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
-from exwin.backend.winetricks import is_available as winetricks_available  # noqa: E402
 from exwin.db.apps import get_all_apps  # noqa: E402
 from exwin.models import AppEntry  # noqa: E402
-
-_ARCH_OPTIONS = ["win64", "win32"]
+from exwin.ui.install_pages import (  # noqa: E402
+    _ARCH_OPTIONS,
+    build_confirm_generic_page,
+    build_confirm_gog_page,
+    build_done_page,
+    build_error_page,
+    build_exe_select_page,
+    build_installing_page,
+    build_welcome_page,
+    build_wine_running_page,
+)
 
 
 class InstallDialog(Adw.Dialog):
@@ -48,7 +56,7 @@ class InstallDialog(Adw.Dialog):
         initial_installer: Path | None = None,
         **kwargs,
     ) -> None:
-        super().__init__(title="Install Game", content_width=500, **kwargs)
+        super().__init__(title="Install Game", content_width=500, content_height=520, **kwargs)
         self._config = config
         self._runtimes = runtimes
         self._on_installed = on_installed
@@ -83,14 +91,7 @@ class InstallDialog(Adw.Dialog):
         self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
         toolbar_view.set_content(self._stack)
 
-        self._build_welcome_page()
-        self._build_confirm_page()
-        self._build_confirm_generic_page()
-        self._build_installing_page()
-        self._build_wine_running_page()
-        self._build_exe_select_page()
-        self._build_done_page()
-        self._build_error_page()
+        self._build_pages()
 
         if self._initial_installer and self._initial_installer.exists():
             self._installer_path = self._initial_installer
@@ -101,351 +102,77 @@ class InstallDialog(Adw.Dialog):
             self._set_step(1)
 
     # ------------------------------------------------------------------
-    # Page builders
+    # Page setup (delegates to install_pages module)
     # ------------------------------------------------------------------
 
-    def _build_welcome_page(self) -> None:
-        page = Adw.StatusPage(
-            title="Install a Game",
-            description="Select a Windows installer (.exe) to continue.",
-            icon_name="document-open-symbolic",
+    def _build_pages(self) -> None:
+        build_welcome_page(self._stack, self._on_choose_clicked)
+
+        gog = build_confirm_gog_page(
+            self._stack,
+            self._runtimes,
+            self._base_games,
+            on_install_clicked=self._on_install_clicked,
+            on_gog_wine_toggled=self._on_gog_wine_toggled,
+            on_dlc_toggled=self._on_dlc_toggled,
         )
-        btn = Gtk.Button(label="Choose Installer…")
-        btn.add_css_class("suggested-action")
-        btn.add_css_class("pill")
-        btn.connect("clicked", self._on_choose_clicked)
-        page.set_child(btn)
+        self._rar_warn_banner = gog.rar_warn_banner
+        self._title_row = gog.title_row
+        self._gameid_row = gog.gameid_row
+        self._lang_row = gog.lang_row
+        self._parts_row = gog.parts_row
+        self._runtime_row = gog.runtime_row
+        self._arch_row = gog.arch_row
+        self._winetricks_row = gog.winetricks_row
+        self._dlc_switch_row = gog.dlc_switch_row
+        self._base_game_row = gog.base_game_row
+        self._dxvk_row = gog.dxvk_row
+        self._vkd3d_row = gog.vkd3d_row
+        self._gog_wine_row = gog.gog_wine_row
+        self._install_btn = gog.install_btn
 
-        try:
-            find_innoextract()
-        except RuntimeError as exc:
-            warn = Gtk.Label(label=str(exc))
-            warn.add_css_class("error")
-            warn.set_wrap(True)
-            warn.set_halign(Gtk.Align.CENTER)
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-            box.set_halign(Gtk.Align.CENTER)
-            box.append(btn)
-            box.append(warn)
-            page.set_child(box)
-
-        self._stack.add_named(page, "welcome")
-
-    def _build_confirm_page(self) -> None:
-        """Confirm page for GOG/InnoSetup installers."""
-        scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=16,
-            margin_top=16,
-            margin_bottom=16,
-            margin_start=16,
-            margin_end=16,
+        generic = build_confirm_generic_page(
+            self._stack,
+            self._runtimes,
+            self._base_games,
+            on_install_clicked=self._on_generic_install_clicked,
+            on_dlc_toggled=self._on_generic_dlc_toggled,
         )
-        scroll.set_child(box)
+        self._generic_file_row = generic.file_row
+        self._generic_runtime_row = generic.runtime_row
+        self._generic_arch_row = generic.arch_row
+        self._generic_winetricks_row = generic.winetricks_row
+        self._generic_dlc_switch_row = generic.dlc_switch_row
+        self._generic_base_game_row = generic.base_game_row
+        self._generic_dxvk_row = generic.dxvk_row
+        self._generic_vkd3d_row = generic.vkd3d_row
 
-        self._rar_warn_banner = Adw.Banner(
-            title="Multi-part installer requires 'unrar' or 'unar' — install one to continue.",
-            revealed=False,
+        inst = build_installing_page(self._stack)
+        self._install_spinner = inst.spinner
+        self._install_status_label = inst.status_label
+        self._progress_bar = inst.progress_bar
+        self._log_buffer = inst.log_buffer
+        self._log_scroll = inst.log_scroll
+
+        build_wine_running_page(self._stack, self._on_cancel_wine)
+
+        exe = build_exe_select_page(
+            self._stack,
+            on_exe_confirmed=self._on_exe_confirmed,
+            on_exe_row_selected=self._on_exe_row_selected,
         )
-        box.append(self._rar_warn_banner)
+        self._exe_list = exe.exe_list
+        self._exe_confirm_btn = exe.confirm_btn
 
-        self._game_info_group = Adw.PreferencesGroup(title="Game")
-        self._title_row = Adw.ActionRow(title="Title")
-        self._gameid_row = Adw.ActionRow(title="GOG ID")
-        self._lang_row = Adw.ActionRow(title="Languages")
-        self._parts_row = Adw.ActionRow(title="Installer Parts")
-        self._game_info_group.add(self._title_row)
-        self._game_info_group.add(self._gameid_row)
-        self._game_info_group.add(self._lang_row)
-        self._game_info_group.add(self._parts_row)
-        box.append(self._game_info_group)
+        done = build_done_page(self._stack, lambda _: self.close())
+        self._done_page = done.page
 
-        options_group = Adw.PreferencesGroup(title="Install Options")
-        box.append(options_group)
-
-        self._runtime_row = Adw.ComboRow(title="Runtime")
-        rt_names = [rt.name for rt in self._runtimes] if self._runtimes else ["None detected"]
-        self._runtime_row.set_model(Gtk.StringList.new(rt_names))
-        self._runtime_row.set_selected(0)
-        options_group.add(self._runtime_row)
-
-        self._arch_row = Adw.ComboRow(title="Windows Architecture")
-        self._arch_row.set_model(Gtk.StringList.new(_ARCH_OPTIONS))
-        self._arch_row.set_selected(0)
-        options_group.add(self._arch_row)
-
-        self._winetricks_row = Adw.EntryRow(title="Winetricks Verbs")
-        self._winetricks_row.set_tooltip_text("Space-separated list, e.g.: vcredist2019 dxvk")
-        if not winetricks_available():
-            self._winetricks_row.set_sensitive(False)
-            self._winetricks_row.set_title("Winetricks Verbs (winetricks not installed)")
-        options_group.add(self._winetricks_row)
-
-        self._dlc_switch_row = Adw.SwitchRow(
-            title="DLC / Add-on",
-            subtitle="Install into an existing game's directory",
+        err = build_error_page(
+            self._stack,
+            on_retry=self._on_retry_clicked,
+            on_close=lambda _: self.close(),
         )
-        if not self._base_games:
-            self._dlc_switch_row.set_sensitive(False)
-            self._dlc_switch_row.set_subtitle("No games installed yet")
-        self._dlc_switch_row.connect("notify::active", self._on_dlc_toggled)
-        options_group.add(self._dlc_switch_row)
-
-        base_names = [app.name for app in self._base_games] or ["—"]
-        self._base_game_row = Adw.ComboRow(title="Base Game")
-        self._base_game_row.set_model(Gtk.StringList.new(base_names))
-        self._base_game_row.set_selected(0)
-        self._base_game_row.set_visible(False)
-        options_group.add(self._base_game_row)
-
-        self._dxvk_row = Adw.SwitchRow(title="Install DXVK", subtitle="DirectX 9/10/11 → Vulkan")
-        options_group.add(self._dxvk_row)
-
-        self._vkd3d_row = Adw.SwitchRow(
-            title="Install VKD3D-Proton", subtitle="DirectX 12 → Vulkan"
-        )
-        options_group.add(self._vkd3d_row)
-
-        self._gog_wine_row = Adw.SwitchRow(
-            title="Run via Wine Installer",
-            subtitle="Runs the GOG setup interactively — required for games that use registry-based CD keys",
-        )
-        self._gog_wine_row.connect("notify::active", self._on_gog_wine_toggled)
-        options_group.add(self._gog_wine_row)
-
-        self._install_btn = Gtk.Button(label="Install")
-        self._install_btn.add_css_class("suggested-action")
-        self._install_btn.add_css_class("pill")
-        self._install_btn.set_halign(Gtk.Align.CENTER)
-        self._install_btn.connect("clicked", self._on_install_clicked)
-        box.append(self._install_btn)
-
-        self._stack.add_named(scroll, "confirm")
-
-    def _build_confirm_generic_page(self) -> None:
-        """Confirm page for generic (non-InnoSetup) Wine installers."""
-        scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=16,
-            margin_top=16,
-            margin_bottom=16,
-            margin_start=16,
-            margin_end=16,
-        )
-        scroll.set_child(box)
-
-        # Info banner
-        info_group = Adw.PreferencesGroup(title="Installer")
-        self._generic_file_row = Adw.ActionRow(title="File")
-        info_group.add(self._generic_file_row)
-        box.append(info_group)
-
-        banner = Gtk.Label(
-            label="This installer will run interactively via Wine.\n"
-            "Interact with the Windows installer window to complete installation.",
-            wrap=True,
-            halign=Gtk.Align.CENTER,
-        )
-        banner.add_css_class("dim-label")
-        banner.add_css_class("caption")
-        box.append(banner)
-
-        options_group = Adw.PreferencesGroup(title="Install Options")
-        box.append(options_group)
-
-        self._generic_runtime_row = Adw.ComboRow(title="Runtime")
-        rt_names = [rt.name for rt in self._runtimes] if self._runtimes else ["None detected"]
-        self._generic_runtime_row.set_model(Gtk.StringList.new(rt_names))
-        self._generic_runtime_row.set_selected(0)
-        options_group.add(self._generic_runtime_row)
-
-        self._generic_arch_row = Adw.ComboRow(title="Windows Architecture")
-        self._generic_arch_row.set_model(Gtk.StringList.new(_ARCH_OPTIONS))
-        self._generic_arch_row.set_selected(0)
-        options_group.add(self._generic_arch_row)
-
-        self._generic_winetricks_row = Adw.EntryRow(title="Winetricks Verbs (post-install)")
-        self._generic_winetricks_row.set_tooltip_text(
-            "Space-separated list applied after installation"
-        )
-        if not winetricks_available():
-            self._generic_winetricks_row.set_sensitive(False)
-            self._generic_winetricks_row.set_title("Winetricks Verbs (winetricks not installed)")
-        options_group.add(self._generic_winetricks_row)
-
-        self._generic_dlc_switch_row = Adw.SwitchRow(
-            title="DLC / Add-on",
-            subtitle="Install into an existing game's directory",
-        )
-        if not self._base_games:
-            self._generic_dlc_switch_row.set_sensitive(False)
-            self._generic_dlc_switch_row.set_subtitle("No games installed yet")
-        self._generic_dlc_switch_row.connect("notify::active", self._on_generic_dlc_toggled)
-        options_group.add(self._generic_dlc_switch_row)
-
-        generic_base_names = [app.name for app in self._base_games] or ["—"]
-        self._generic_base_game_row = Adw.ComboRow(title="Base Game")
-        self._generic_base_game_row.set_model(Gtk.StringList.new(generic_base_names))
-        self._generic_base_game_row.set_selected(0)
-        self._generic_base_game_row.set_visible(False)
-        options_group.add(self._generic_base_game_row)
-
-        self._generic_dxvk_row = Adw.SwitchRow(
-            title="Install DXVK", subtitle="DirectX 9/10/11 → Vulkan"
-        )
-        options_group.add(self._generic_dxvk_row)
-
-        self._generic_vkd3d_row = Adw.SwitchRow(
-            title="Install VKD3D-Proton", subtitle="DirectX 12 → Vulkan"
-        )
-        options_group.add(self._generic_vkd3d_row)
-
-        install_btn = Gtk.Button(label="Run Installer")
-        install_btn.add_css_class("suggested-action")
-        install_btn.add_css_class("pill")
-        install_btn.set_halign(Gtk.Align.CENTER)
-        install_btn.connect("clicked", self._on_generic_install_clicked)
-        box.append(install_btn)
-
-        self._stack.add_named(scroll, "confirm_generic")
-
-    def _build_installing_page(self) -> None:
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=12,
-            margin_top=16,
-            margin_bottom=16,
-            margin_start=16,
-            margin_end=16,
-            vexpand=True,
-        )
-
-        status_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=10,
-            halign=Gtk.Align.CENTER,
-        )
-        self._install_spinner = Gtk.Spinner()
-        self._install_spinner.set_spinning(False)
-        status_box.append(self._install_spinner)
-
-        self._install_status_label = Gtk.Label(label="Installing…")
-        self._install_status_label.add_css_class("heading")
-        status_box.append(self._install_status_label)
-        box.append(status_box)
-
-        self._progress_bar = Gtk.ProgressBar()
-        self._progress_bar.set_show_text(True)
-        self._progress_bar.set_visible(False)
-        box.append(self._progress_bar)
-
-        scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        self._log_buffer = Gtk.TextBuffer()
-        log_view = Gtk.TextView(buffer=self._log_buffer, editable=False, monospace=True)
-        log_view.add_css_class("caption")
-        scroll.set_child(log_view)
-        self._log_scroll = scroll
-        box.append(scroll)
-
-        self._stack.add_named(box, "installing")
-
-    def _build_wine_running_page(self) -> None:
-        page = Adw.StatusPage(
-            title="Installer Running",
-            description="Interact with the Windows installer window.\n"
-            "exwin will continue automatically when you close it.",
-            icon_name="application-x-executable-symbolic",
-        )
-        cancel_btn = Gtk.Button(label="Cancel")
-        cancel_btn.add_css_class("destructive-action")
-        cancel_btn.add_css_class("pill")
-        cancel_btn.connect("clicked", self._on_cancel_wine)
-        page.set_child(cancel_btn)
-        self._stack.add_named(page, "wine_running")
-
-    def _build_exe_select_page(self) -> None:
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=12,
-            margin_top=16,
-            margin_bottom=16,
-            margin_start=16,
-            margin_end=16,
-            vexpand=True,
-        )
-
-        title = Gtk.Label(label="Select the main executable")
-        title.add_css_class("title-3")
-        title.set_halign(Gtk.Align.START)
-        box.append(title)
-
-        subtitle = Gtk.Label(label="Choose the .exe file that launches the game or application.")
-        subtitle.add_css_class("dim-label")
-        subtitle.set_wrap(True)
-        subtitle.set_halign(Gtk.Align.START)
-        box.append(subtitle)
-
-        scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        self._exe_list = Gtk.ListBox()
-        self._exe_list.add_css_class("boxed-list")
-        self._exe_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        scroll.set_child(self._exe_list)
-        box.append(scroll)
-
-        self._exe_confirm_btn = Gtk.Button(label="Use Selected Executable")
-        self._exe_confirm_btn.add_css_class("suggested-action")
-        self._exe_confirm_btn.add_css_class("pill")
-        self._exe_confirm_btn.set_halign(Gtk.Align.CENTER)
-        self._exe_confirm_btn.set_sensitive(False)
-        self._exe_confirm_btn.connect("clicked", self._on_exe_confirmed)
-        box.append(self._exe_confirm_btn)
-
-        self._exe_list.connect("row-selected", self._on_exe_row_selected)
-
-        self._stack.add_named(box, "exe_select")
-
-    def _build_done_page(self) -> None:
-        self._done_page = Adw.StatusPage(
-            title="Installed!",
-            icon_name="emblem-ok-symbolic",
-        )
-        close_btn = Gtk.Button(label="Close")
-        close_btn.add_css_class("pill")
-        close_btn.connect("clicked", lambda _: self.close())
-        self._done_page.set_child(close_btn)
-        self._stack.add_named(self._done_page, "done")
-
-    def _build_error_page(self) -> None:
-        self._error_page = Adw.StatusPage(
-            title="Installation Failed",
-            icon_name="dialog-error-symbolic",
-        )
-        btn_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=8,
-            halign=Gtk.Align.CENTER,
-        )
-        retry_btn = Gtk.Button(label="Try Again")
-        retry_btn.add_css_class("pill")
-        retry_btn.connect("clicked", self._on_retry_clicked)
-        close_btn = Gtk.Button(label="Close")
-        close_btn.add_css_class("destructive-action")
-        close_btn.add_css_class("pill")
-        close_btn.connect("clicked", lambda _: self.close())
-        btn_box.append(retry_btn)
-        btn_box.append(close_btn)
-        self._error_page.set_child(btn_box)
-        self._stack.add_named(self._error_page, "error")
+        self._error_page = err.page
 
     # ------------------------------------------------------------------
     # Step indicator
@@ -665,13 +392,31 @@ class InstallDialog(Adw.Dialog):
         try:
             proc = run_wine_installer(installer, p_root, runtime, arch)
             self._wine_proc = proc
+            start = time.monotonic()
             proc.wait()
+            elapsed = time.monotonic() - start
             self._wine_proc = None
-            GLib.idle_add(self._on_wine_installer_done)
+            rc = proc.returncode
+
+            if rc != 0 and elapsed < 5:
+                # Process exited almost immediately with an error — installer never ran
+                GLib.idle_add(
+                    self._on_error,
+                    f"The installer process failed to launch (exit code {rc}).\n"
+                    "Check that the selected runtime is installed and working.",
+                )
+                return
+
+            GLib.idle_add(self._on_wine_installer_done, rc)
+        except FileNotFoundError as exc:
+            GLib.idle_add(
+                self._on_error,
+                f"Could not find the runtime binary: {exc}\nMake sure Wine or Proton is installed.",
+            )
         except Exception as exc:
             GLib.idle_add(self._on_error, str(exc))
 
-    def _on_wine_installer_done(self) -> None:
+    def _on_wine_installer_done(self, rc: int = 0) -> None:
         if self._generic_dlc_mode and self._generic_dlc_base_app is not None:
             self._done_page.set_description(
                 f'DLC installed for "{self._generic_dlc_base_app.name}".'
@@ -683,10 +428,16 @@ class InstallDialog(Adw.Dialog):
         candidates = scan_candidate_exes(self._generic_prefix_root, self._generic_runtime)
 
         if not candidates:
-            self._on_error(
-                "Wine installer finished but no executable was found in the prefix.\n"
-                "The installation may have failed."
-            )
+            if rc != 0:
+                self._on_error(
+                    f"The installer exited with error code {rc} and no executable was found.\n"
+                    "The installation likely failed — check the runtime configuration."
+                )
+            else:
+                self._on_error(
+                    "Wine installer finished but no executable was found in the prefix.\n"
+                    "The installation may have failed or installed to an unexpected location."
+                )
             return
 
         # When multiple candidates exist, let the user choose

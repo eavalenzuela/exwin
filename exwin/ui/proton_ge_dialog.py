@@ -28,7 +28,7 @@ class ProtonGEDialog(Adw.Dialog):
         on_installed: Callable[[], None],
         **kwargs,
     ) -> None:
-        super().__init__(title="Download Proton-GE", content_width=420, **kwargs)
+        super().__init__(title="Download Proton-GE", content_width=420, content_height=400, **kwargs)
         self._on_installed = on_installed
         self._release: dict | None = None
 
