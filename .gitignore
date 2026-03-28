@@ -8,6 +8,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Windows executables (present for testing)
+*.exe
+
 # C extensions
 *.so
 
