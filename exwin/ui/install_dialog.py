@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -64,7 +65,7 @@ class InstallDialog(Adw.Dialog):
         self._installer_path: Path | None = None
         self._installer_parts: list[Path] = []
         self._installer_type: str = "innosetup"  # "innosetup" | "generic"
-        self._wine_proc = None  # running Wine installer subprocess
+        self._wine_proc: subprocess.Popen | None = None  # running Wine installer subprocess
         self._generic_prefix_root: Path | None = None
         self._generic_runtime: Runtime | None = None
         self._generic_arch: str = "win64"

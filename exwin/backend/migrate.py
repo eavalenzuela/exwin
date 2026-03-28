@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import shutil
 from collections.abc import Callable
+from pathlib import Path
 
 from exwin.backend.config import Config
 from exwin.db.apps import update_paths
@@ -35,8 +36,8 @@ def move_game_data(
     if config.storage_root is None:
         raise RuntimeError("No storage root configured — set one in Settings first.")
 
-    old_install = app.install_path
-    old_prefix = app.prefix_path
+    old_install: Path | None = app.install_path
+    old_prefix: Path | None = app.prefix_path
     new_install = config.installs_dir / app.app_id
     new_prefix = config.prefixes_dir / app.app_id
 
@@ -50,7 +51,7 @@ def move_game_data(
         new_install.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(old_install), str(new_install))
         _log("Game files moved.")
-        updated_install = new_install
+        updated_install: Path | None = new_install
     else:
         _log("Game files already at target location.")
         updated_install = app.install_path

@@ -72,11 +72,11 @@ def update_playtime(app_id: str, elapsed_seconds: int) -> None:
         )
 
 
-def update_paths(app_id: str, install_path: Path, prefix_path: Path) -> None:
+def update_paths(app_id: str, install_path: Path | None, prefix_path: Path | None) -> None:
     with get_conn() as conn:
         conn.execute(
             "UPDATE apps SET install_path = ?, prefix_path = ? WHERE id = ?",
-            (str(install_path), str(prefix_path), app_id),
+            (str(install_path) if install_path else "", str(prefix_path) if prefix_path else "", app_id),
         )
 
 

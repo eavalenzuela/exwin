@@ -226,7 +226,7 @@ def finalize_generic_install(
         install_path=p_root,
         prefix_path=p_root,
         exe_path=exe_rel,
-        cover_art_path="",
+        cover_art_path=None,
         install_date=datetime.now(UTC).isoformat(),
         runtime_id=runtime.db_id if runtime else None,
     )

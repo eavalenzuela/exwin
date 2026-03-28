@@ -133,6 +133,8 @@ class Launcher:
             GLib.idle_add(on_exit, app_id)
 
     def _build_command(self, app: AppEntry, runtime: Runtime, app_config: AppConfig) -> list[str]:
+        if not app.install_path:
+            raise FileNotFoundError("No install path set for this app.")
         exe_path = app.install_path / app.exe_path
         if not exe_path.exists():
             raise FileNotFoundError(

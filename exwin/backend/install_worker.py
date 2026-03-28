@@ -225,6 +225,8 @@ def install_gog_dlc(
 
     # ── 2. Extract into base game directory ───────────────────────────────
     install_dir = base_app.install_path
+    if not install_dir:
+        raise RuntimeError("Base game has no install path.")
     _log(f"Extracting DLC into {install_dir} …")
     try:
         extract(installer_path, install_dir, on_progress=_log)
