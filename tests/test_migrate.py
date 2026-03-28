@@ -9,7 +9,7 @@ import pytest
 from exwin.backend.config import Config
 from exwin.backend.migrate import move_game_data
 from exwin.db.schema import init_db
-from exwin.models import AppEntry
+from exwin.models import AppEntry, AppSource
 
 
 def _make_app(
@@ -27,9 +27,9 @@ def _make_app(
     return AppEntry(
         app_id=app_id,
         name=name,
-        source="gog",
-        install_path=str(install_dir),
-        prefix_path=str(prefix_dir),
+        source=AppSource.GOG,
+        install_path=install_dir,
+        prefix_path=prefix_dir,
     )
 
 
@@ -105,9 +105,9 @@ class TestMoveGameData:
         app = AppEntry(
             app_id="gog-99",
             name="Already There",
-            source="gog",
-            install_path=str(install_dir),
-            prefix_path=str(prefix_dir),
+            source=AppSource.GOG,
+            install_path=install_dir,
+            prefix_path=prefix_dir,
         )
         new_app = move_game_data(app, db)
         assert new_app.install_path == app.install_path
@@ -136,11 +136,11 @@ class TestMoveGameData:
         app = AppEntry(
             app_id="manual-mygame",
             name="My Game",
-            source="manual",
-            install_path=str(install_dir),
-            prefix_path=str(install_dir),  # same dir as install
+            source=AppSource.MANUAL,
+            install_path=install_dir,
+            prefix_path=install_dir,  # same dir as install
         )
         new_app = move_game_data(app, db)
         # Both should point to the new install location
         assert new_app.install_path == new_app.prefix_path
-        assert Path(new_app.install_path) == db.installs_dir / "manual-mygame"
+        assert new_app.install_path == db.installs_dir / "manual-mygame"

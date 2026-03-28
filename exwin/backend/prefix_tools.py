@@ -9,22 +9,21 @@ from pathlib import Path
 from exwin.backend.runtime import Runtime
 
 
-def _prefix_env(prefix_path: str, runtime: Runtime) -> dict[str, str]:
+def _prefix_env(prefix_path: Path, runtime: Runtime) -> dict[str, str]:
     """Build the environment dict for running Wine tools against a prefix."""
     env = os.environ.copy()
-    prefix_root = Path(prefix_path)
 
     if runtime.is_proton:
-        env["WINEPREFIX"] = str(prefix_root / "pfx")
+        env["WINEPREFIX"] = str(prefix_path / "pfx")
         env["WINE"] = str(runtime.wine_binary)
-        env["WINESERVER"] = str(Path(runtime.path) / "files" / "bin" / "wineserver")
+        env["WINESERVER"] = str(runtime.path / "files" / "bin" / "wineserver")
     else:
-        env["WINEPREFIX"] = str(prefix_root)
+        env["WINEPREFIX"] = str(prefix_path)
 
     return env
 
 
-def run_winecfg(prefix_path: str, runtime: Runtime) -> subprocess.Popen:
+def run_winecfg(prefix_path: Path, runtime: Runtime) -> subprocess.Popen:
     """Launch winecfg for the given prefix."""
     env = _prefix_env(prefix_path, runtime)
     return subprocess.Popen(
@@ -34,7 +33,7 @@ def run_winecfg(prefix_path: str, runtime: Runtime) -> subprocess.Popen:
     )
 
 
-def run_regedit(prefix_path: str, runtime: Runtime) -> subprocess.Popen:
+def run_regedit(prefix_path: Path, runtime: Runtime) -> subprocess.Popen:
     """Launch regedit for the given prefix."""
     env = _prefix_env(prefix_path, runtime)
     return subprocess.Popen(
@@ -44,13 +43,13 @@ def run_regedit(prefix_path: str, runtime: Runtime) -> subprocess.Popen:
     )
 
 
-def kill_prefix(prefix_path: str, runtime: Runtime) -> None:
+def kill_prefix(prefix_path: Path, runtime: Runtime) -> None:
     """Kill all processes in the Wine prefix via wineserver -k."""
     env = _prefix_env(prefix_path, runtime)
     if runtime.is_proton:
-        wineserver = str(Path(runtime.path) / "files" / "bin" / "wineserver")
+        wineserver = str(runtime.path / "files" / "bin" / "wineserver")
     else:
-        wineserver = str(Path(runtime.path) / "bin" / "wineserver")
+        wineserver = str(runtime.path / "bin" / "wineserver")
     subprocess.run(
         [wineserver, "-k"],
         env=env,

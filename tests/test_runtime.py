@@ -11,6 +11,7 @@ from exwin.backend.runtime import (
     _read_wine_version,
     scan_runtimes,
 )
+from exwin.models import RuntimeType
 
 # ---------------------------------------------------------------------------
 # Runtime dataclass
@@ -19,27 +20,27 @@ from exwin.backend.runtime import (
 
 class TestRuntime:
     def test_is_proton(self) -> None:
-        rt = Runtime(name="Proton 9", type="proton", path="/opt/proton")
+        rt = Runtime(name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"))
         assert rt.is_proton is True
 
     def test_is_not_proton(self) -> None:
-        rt = Runtime(name="Wine", type="wine", path="/usr")
+        rt = Runtime(name="Wine", type=RuntimeType.WINE, path=Path("/usr"))
         assert rt.is_proton is False
 
     def test_proton_binary(self) -> None:
-        rt = Runtime(name="Proton 9", type="proton", path="/opt/proton")
+        rt = Runtime(name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"))
         assert rt.proton_binary == Path("/opt/proton/proton")
 
     def test_wine_binary_for_proton(self) -> None:
-        rt = Runtime(name="Proton 9", type="proton", path="/opt/proton")
+        rt = Runtime(name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"))
         assert rt.wine_binary == Path("/opt/proton/files/bin/wine")
 
     def test_wine_binary_for_wine(self) -> None:
-        rt = Runtime(name="Wine", type="wine", path="/usr")
+        rt = Runtime(name="Wine", type=RuntimeType.WINE, path=Path("/usr"))
         assert rt.wine_binary == Path("/usr/bin/wine")
 
     def test_str(self) -> None:
-        rt = Runtime(name="GE-Proton9-27", type="proton", path="/p")
+        rt = Runtime(name="GE-Proton9-27", type=RuntimeType.PROTON, path=Path("/p"))
         assert str(rt) == "GE-Proton9-27"
 
 
@@ -97,7 +98,7 @@ class TestScanRuntimes:
 
         assert len(runtimes) == 1
         assert runtimes[0].name == "GE-Proton9-27"
-        assert runtimes[0].type == "proton"
+        assert runtimes[0].type == RuntimeType.PROTON
         assert runtimes[0].version == "GE-Proton9-27"
 
     def test_skips_non_proton_dirs(self, tmp_path: Path) -> None:
@@ -122,7 +123,7 @@ class TestScanRuntimes:
                     runtimes = scan_runtimes()
 
         assert len(runtimes) == 1
-        assert runtimes[0].type == "wine"
+        assert runtimes[0].type == RuntimeType.WINE
         assert runtimes[0].version == "wine-9.0"
 
     def test_deduplicates_by_resolved_path(self, tmp_path: Path) -> None:

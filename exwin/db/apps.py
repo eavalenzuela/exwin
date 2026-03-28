@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from exwin.db.schema import get_conn
 from exwin.models import AppEntry
 
@@ -36,11 +38,11 @@ def insert_app(app: AppEntry) -> None:
                 "id": app.app_id,
                 "name": app.name,
                 "source": app.source,
-                "install_path": app.install_path,
-                "prefix_path": app.prefix_path,
+                "install_path": str(app.install_path) if app.install_path else "",
+                "prefix_path": str(app.prefix_path) if app.prefix_path else "",
                 "exe_path": app.exe_path,
                 "runtime_id": app.runtime_id,
-                "cover_art_path": app.cover_art_path,
+                "cover_art_path": str(app.cover_art_path) if app.cover_art_path else "",
                 "description": app.description,
                 "install_date": app.install_date,
             },
@@ -57,9 +59,9 @@ def update_description(app_id: str, description: str) -> None:
         conn.execute("UPDATE apps SET description = ? WHERE id = ?", (description, app_id))
 
 
-def update_cover_art(app_id: str, path: str) -> None:
+def update_cover_art(app_id: str, path: Path) -> None:
     with get_conn() as conn:
-        conn.execute("UPDATE apps SET cover_art_path = ? WHERE id = ?", (path, app_id))
+        conn.execute("UPDATE apps SET cover_art_path = ? WHERE id = ?", (str(path), app_id))
 
 
 def update_playtime(app_id: str, elapsed_seconds: int) -> None:
@@ -70,11 +72,11 @@ def update_playtime(app_id: str, elapsed_seconds: int) -> None:
         )
 
 
-def update_paths(app_id: str, install_path: str, prefix_path: str) -> None:
+def update_paths(app_id: str, install_path: Path, prefix_path: Path) -> None:
     with get_conn() as conn:
         conn.execute(
             "UPDATE apps SET install_path = ?, prefix_path = ? WHERE id = ?",
-            (install_path, prefix_path, app_id),
+            (str(install_path), str(prefix_path), app_id),
         )
 
 

@@ -9,11 +9,13 @@ from unittest.mock import patch
 import pytest
 
 from exwin.backend.desktop_shortcut import create_shortcut
-from exwin.models import AppEntry
+from exwin.models import AppEntry, AppSource
 
 
-def _make_app(app_id: str = "gog-12345", name: str = "Test Game", cover: str = "") -> AppEntry:
-    return AppEntry(app_id=app_id, name=name, source="gog", cover_art_path=cover)
+def _make_app(
+    app_id: str = "gog-12345", name: str = "Test Game", cover: Path | None = None
+) -> AppEntry:
+    return AppEntry(app_id=app_id, name=name, source=AppSource.GOG, cover_art_path=cover)
 
 
 @pytest.fixture
@@ -48,21 +50,21 @@ class TestCreateShortcut:
     def test_icon_uses_cover_art_when_present(self, shortcut_dir: Path, tmp_path: Path) -> None:
         cover = tmp_path / "cover.jpg"
         cover.write_bytes(b"")
-        app = _make_app(cover=str(cover))
+        app = _make_app(cover=cover)
         dest = create_shortcut(app)
         content = dest.read_text()
         icon_line = next(line for line in content.splitlines() if line.startswith("Icon="))
         assert icon_line == f"Icon={cover}"
 
     def test_icon_fallback_when_no_cover(self, shortcut_dir: Path) -> None:
-        app = _make_app(cover="")
+        app = _make_app()
         dest = create_shortcut(app)
         content = dest.read_text()
         icon_line = next(line for line in content.splitlines() if line.startswith("Icon="))
         assert icon_line == "Icon=applications-games-symbolic"
 
     def test_icon_fallback_when_cover_missing_on_disk(self, shortcut_dir: Path) -> None:
-        app = _make_app(cover="/nonexistent/path/cover.jpg")
+        app = _make_app(cover=Path("/nonexistent/path/cover.jpg"))
         dest = create_shortcut(app)
         content = dest.read_text()
         icon_line = next(line for line in content.splitlines() if line.startswith("Icon="))

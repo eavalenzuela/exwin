@@ -85,8 +85,8 @@ class AppDetailDialog(Adw.Dialog):
         scroll.set_child(content)
 
         # Cover art
-        if app.cover_art_path and Path(app.cover_art_path).exists():
-            cover: Gtk.Widget = Gtk.Picture.new_for_filename(app.cover_art_path)
+        if app.cover_art_path and app.cover_art_path.exists():
+            cover: Gtk.Widget = Gtk.Picture.new_for_filename(str(app.cover_art_path))
             cover.set_content_fit(Gtk.ContentFit.CONTAIN)  # type: ignore[attr-defined]
         else:
             cover = Gtk.Image()
@@ -150,9 +150,9 @@ class AppDetailDialog(Adw.Dialog):
         content.append(info_group)
 
         if app.install_path:
-            info_group.add(_info_row("Install Path", app.install_path, copyable=True))
+            info_group.add(_info_row("Install Path", str(app.install_path), copyable=True))
         if app.prefix_path:
-            info_group.add(_info_row("Wine Prefix", app.prefix_path, copyable=True))
+            info_group.add(_info_row("Wine Prefix", str(app.prefix_path), copyable=True))
         if app.install_date:
             info_group.add(_info_row("Installed", app.install_date[:10]))
         if app.last_launched:
@@ -160,12 +160,11 @@ class AppDetailDialog(Adw.Dialog):
         if app.playtime_seconds > 0:
             info_group.add(_info_row("Play Time", _fmt_playtime(app.playtime_seconds)))
         if app.install_path:
-            install_dir = Path(app.install_path)
-            size = _dir_size(install_dir)
+            size = _dir_size(app.install_path)
             if size > 0:
                 info_group.add(_info_row("Install Size", _fmt_size(size)))
             try:
-                free = shutil.disk_usage(install_dir).free
+                free = shutil.disk_usage(app.install_path).free
                 info_group.add(_info_row("Disk Free", _fmt_size(free)))
             except OSError:
                 pass
@@ -190,7 +189,7 @@ class AppDetailDialog(Adw.Dialog):
 
         if config.storage_root is not None and app.install_path:
             target = config.installs_dir / app.app_id
-            if Path(app.install_path).resolve() != target.resolve():
+            if app.install_path.resolve() != target.resolve():
                 migrate_btn = Gtk.Button(label="Move to Storage")
                 migrate_btn.add_css_class("flat")
                 migrate_btn.set_tooltip_text(

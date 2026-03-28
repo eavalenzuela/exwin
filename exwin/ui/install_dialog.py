@@ -31,7 +31,7 @@ from exwin.backend.gog_installer import (  # noqa: E402
 from exwin.backend.install_worker import install_gog, install_gog_dlc  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.db.apps import get_all_apps  # noqa: E402
-from exwin.models import AppEntry  # noqa: E402
+from exwin.models import AppEntry, AppSource  # noqa: E402
 from exwin.ui.install_pages import (  # noqa: E402
     _ARCH_OPTIONS,
     build_confirm_generic_page,
@@ -366,7 +366,7 @@ class InstallDialog(Adw.Dialog):
             base_app = self._base_games[self._generic_base_game_row.get_selected()]
             self._generic_dlc_mode = True
             self._generic_dlc_base_app = base_app
-            p_root = Path(base_app.prefix_path)
+            p_root = base_app.prefix_path
         else:
             from exwin.backend.prefix import prefix_root
 
@@ -521,10 +521,10 @@ class InstallDialog(Adw.Dialog):
         assert self._generic_prefix_root is not None
 
         app_id_override = None
-        source_override = "manual"
+        source_override = AppSource.MANUAL
         if self._gog_wine_mode and self._gog_probe_info is not None:
             app_id_override = app_id_from_info(self._gog_probe_info)
-            source_override = "gog"
+            source_override = AppSource.GOG
 
         try:
             app = finalize_generic_install(

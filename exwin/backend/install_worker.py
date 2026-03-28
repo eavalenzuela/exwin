@@ -27,7 +27,7 @@ from exwin.backend.runtime import Runtime
 from exwin.backend.winetricks import is_available as winetricks_available
 from exwin.backend.winetricks import run_verbs
 from exwin.db.apps import insert_app
-from exwin.models import AppEntry
+from exwin.models import AppEntry, AppSource
 
 
 def install_gog(
@@ -116,14 +116,14 @@ def install_gog(
         _log("Warning: could not determine executable — you can set it later in app settings.")
 
     # ── 4. Cover art ─────────────────────────────────────────────────────
-    cover_art_path = ""
+    cover_art_path: Path | None = None
     cover_src = find_cover_art(install_dir)
     if cover_src:
         meta_dir = config.metadata_dir / app_id
         meta_dir.mkdir(parents=True, exist_ok=True)
         cover_dst = meta_dir / "cover.jpg"
         shutil.copy2(cover_src, cover_dst)
-        cover_art_path = str(cover_dst)
+        cover_art_path = cover_dst
         _log(f"Cover art saved to {cover_dst.name}")
     else:
         _log("No cover art found in installer.")
@@ -176,9 +176,9 @@ def install_gog(
     app = AppEntry(
         app_id=app_id,
         name=info.title,
-        source="gog",
-        install_path=str(install_dir),
-        prefix_path=str(p_root),
+        source=AppSource.GOG,
+        install_path=install_dir,
+        prefix_path=p_root,
         exe_path=exe_path or "",
         cover_art_path=cover_art_path,
         install_date=datetime.now(UTC).isoformat(),
@@ -224,7 +224,7 @@ def install_gog_dlc(
     _log(f'DLC: "{info.title}"')
 
     # ── 2. Extract into base game directory ───────────────────────────────
-    install_dir = Path(base_app.install_path)
+    install_dir = base_app.install_path
     _log(f"Extracting DLC into {install_dir} …")
     try:
         extract(installer_path, install_dir, on_progress=_log)

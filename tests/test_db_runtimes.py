@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from exwin.backend.config import Config
 from exwin.backend.runtime import Runtime
 from exwin.db.runtimes import get_all_runtimes, get_runtime, sync_runtimes, upsert_runtime
+from exwin.models import RuntimeType
 
 
 class TestUpsertRuntime:
     def test_insert_new(self, db: Config) -> None:
-        rt = Runtime(name="Proton 9", type="proton", path="/opt/proton", version="9.0")
+        rt = Runtime(
+            name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"), version="9.0"
+        )
         db_id = upsert_runtime(rt)
         assert db_id > 0
 
     def test_update_existing(self, db: Config) -> None:
-        rt = Runtime(name="Proton 9", type="proton", path="/opt/proton", version="9.0")
+        rt = Runtime(
+            name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"), version="9.0"
+        )
         id1 = upsert_runtime(rt)
 
         rt.name = "Proton 9 Updated"
@@ -28,8 +35,12 @@ class TestUpsertRuntime:
         assert fetched.version == "9.1"
 
     def test_different_paths_get_different_ids(self, db: Config) -> None:
-        rt1 = Runtime(name="Proton 9", type="proton", path="/opt/proton9", version="9")
-        rt2 = Runtime(name="Proton 10", type="proton", path="/opt/proton10", version="10")
+        rt1 = Runtime(
+            name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton9"), version="9"
+        )
+        rt2 = Runtime(
+            name="Proton 10", type=RuntimeType.PROTON, path=Path("/opt/proton10"), version="10"
+        )
         id1 = upsert_runtime(rt1)
         id2 = upsert_runtime(rt2)
         assert id1 != id2
@@ -40,13 +51,13 @@ class TestGetRuntime:
         assert get_runtime(99999) is None
 
     def test_returns_runtime(self, db: Config) -> None:
-        rt = Runtime(name="Wine", type="wine", path="/usr", version="wine-9.0")
+        rt = Runtime(name="Wine", type=RuntimeType.WINE, path=Path("/usr"), version="wine-9.0")
         db_id = upsert_runtime(rt)
         fetched = get_runtime(db_id)
         assert fetched is not None
         assert fetched.name == "Wine"
-        assert fetched.type == "wine"
-        assert fetched.path == "/usr"
+        assert fetched.type == RuntimeType.WINE
+        assert fetched.path == Path("/usr")
 
 
 class TestGetAllRuntimes:
@@ -54,8 +65,8 @@ class TestGetAllRuntimes:
         assert get_all_runtimes() == []
 
     def test_returns_all(self, db: Config) -> None:
-        upsert_runtime(Runtime(name="A", type="proton", path="/a", version="1"))
-        upsert_runtime(Runtime(name="B", type="wine", path="/b", version="2"))
+        upsert_runtime(Runtime(name="A", type=RuntimeType.PROTON, path=Path("/a"), version="1"))
+        upsert_runtime(Runtime(name="B", type=RuntimeType.WINE, path=Path("/b"), version="2"))
         all_rt = get_all_runtimes()
         assert len(all_rt) == 2
 
@@ -63,8 +74,10 @@ class TestGetAllRuntimes:
 class TestSyncRuntimes:
     def test_populates_db_ids(self, db: Config) -> None:
         runtimes = [
-            Runtime(name="Proton 9", type="proton", path="/opt/proton", version="9"),
-            Runtime(name="Wine", type="wine", path="/usr", version="wine-9"),
+            Runtime(
+                name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"), version="9"
+            ),
+            Runtime(name="Wine", type=RuntimeType.WINE, path=Path("/usr"), version="wine-9"),
         ]
         result = sync_runtimes(runtimes)
         assert len(result) == 2
@@ -73,7 +86,9 @@ class TestSyncRuntimes:
 
     def test_idempotent(self, db: Config) -> None:
         runtimes = [
-            Runtime(name="Proton 9", type="proton", path="/opt/proton", version="9"),
+            Runtime(
+                name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"), version="9"
+            ),
         ]
         r1 = sync_runtimes(runtimes)
         r2 = sync_runtimes(runtimes)
@@ -81,10 +96,15 @@ class TestSyncRuntimes:
 
     def test_preserves_fields(self, db: Config) -> None:
         runtimes = [
-            Runtime(name="GE-Proton9-27", type="proton", path="/steam/ge", version="GE-Proton9-27"),
+            Runtime(
+                name="GE-Proton9-27",
+                type=RuntimeType.PROTON,
+                path=Path("/steam/ge"),
+                version="GE-Proton9-27",
+            ),
         ]
         result = sync_runtimes(runtimes)
         assert result[0].name == "GE-Proton9-27"
-        assert result[0].type == "proton"
-        assert result[0].path == "/steam/ge"
+        assert result[0].type == RuntimeType.PROTON
+        assert result[0].path == Path("/steam/ge")
         assert result[0].version == "GE-Proton9-27"

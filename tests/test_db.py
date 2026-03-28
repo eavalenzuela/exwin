@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from exwin.backend.config import Config
 from exwin.db.apps import (
     delete_app,
@@ -12,14 +14,16 @@ from exwin.db.apps import (
     update_description,
     update_last_launched,
 )
-from exwin.models import AppEntry
+from exwin.models import AppEntry, AppSource
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _app(app_id: str = "test-app", name: str = "Test App", source: str = "gog") -> AppEntry:
+def _app(
+    app_id: str = "test-app", name: str = "Test App", source: AppSource = AppSource.GOG
+) -> AppEntry:
     return AppEntry(app_id=app_id, name=name, source=source)
 
 
@@ -38,22 +42,22 @@ class TestInsertAndGet:
         assert app is not None
         assert app.app_id == "test-app"
         assert app.name == "Test App"
-        assert app.source == "gog"
+        assert app.source == AppSource.GOG
 
     def test_optional_fields_default_empty(self, db: Config) -> None:
         insert_app(_app())
         app = get_app("test-app")
         assert app is not None
-        assert app.install_path == ""
+        assert app.install_path is None
         assert app.exe_path == ""
-        assert app.cover_art_path == ""
+        assert app.cover_art_path is None
         assert app.description == ""
 
     def test_insert_preserves_install_path(self, db: Config) -> None:
         entry = _app()
-        entry.install_path = "/games/myapp"
+        entry.install_path = Path("/games/myapp")
         insert_app(entry)
-        assert get_app("test-app").install_path == "/games/myapp"
+        assert get_app("test-app").install_path == Path("/games/myapp")
 
     def test_insert_preserves_exe_path(self, db: Config) -> None:
         entry = _app()
@@ -108,14 +112,14 @@ class TestDeleteApp:
 class TestUpdateCoverArt:
     def test_updates_field(self, db: Config) -> None:
         insert_app(_app())
-        update_cover_art("test-app", "/some/cover.jpg")
-        assert get_app("test-app").cover_art_path == "/some/cover.jpg"
+        update_cover_art("test-app", Path("/some/cover.jpg"))
+        assert get_app("test-app").cover_art_path == Path("/some/cover.jpg")
 
     def test_can_overwrite(self, db: Config) -> None:
         insert_app(_app())
-        update_cover_art("test-app", "/old.jpg")
-        update_cover_art("test-app", "/new.jpg")
-        assert get_app("test-app").cover_art_path == "/new.jpg"
+        update_cover_art("test-app", Path("/old.jpg"))
+        update_cover_art("test-app", Path("/new.jpg"))
+        assert get_app("test-app").cover_art_path == Path("/new.jpg")
 
 
 class TestUpdateLastLaunched:

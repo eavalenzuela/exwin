@@ -34,9 +34,9 @@ def db_config(tmp_path: Path) -> Config:
     init_db(cfg.data_dir)
     # Seed a minimal app row so update_cover_art has something to update.
     from exwin.db.apps import insert_app
-    from exwin.models import AppEntry
+    from exwin.models import AppEntry, AppSource
 
-    insert_app(AppEntry(app_id="test-app", name="Test App", source="gog"))
+    insert_app(AppEntry(app_id="test-app", name="Test App", source=AppSource.GOG))
     return cfg
 
 
@@ -106,7 +106,7 @@ class TestApplyCustomCoverArtB64:
         apply_custom_cover_art("test-app", _PNG_DATA_URI, db_config)
         app = get_app("test-app")
         assert app is not None
-        assert app.cover_art_path.endswith("cover.jpg")
+        assert app.cover_art_path.name == "cover.jpg"
 
     def test_invalid_b64_raises(self, db_config: Config) -> None:
         bad_uri = "data:image/png;base64,NOT_VALID_BASE64!!!"

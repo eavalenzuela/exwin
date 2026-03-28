@@ -45,7 +45,7 @@ def run_verbs(
         wineprefix = str(prefix_root / "pfx")
         env["WINEPREFIX"] = wineprefix
         # Point winetricks at Proton's bundled wine binaries
-        proton_bin = Path(runtime.path) / "files" / "bin"
+        proton_bin = runtime.path / "files" / "bin"
         env["WINE"] = str(proton_bin / "wine")
         env["WINE64"] = str(proton_bin / "wine64")
         env["WINESERVER"] = str(proton_bin / "wineserver")

@@ -29,9 +29,9 @@ def upsert_runtime(rt: Runtime) -> int:
                 name    = excluded.name,
                 version = excluded.version
             """,
-            {"name": rt.name, "type": rt.type, "path": rt.path, "version": rt.version},
+            {"name": rt.name, "type": rt.type, "path": str(rt.path), "version": rt.version},
         )
-        row = conn.execute("SELECT id FROM runtimes WHERE path = ?", (rt.path,)).fetchone()
+        row = conn.execute("SELECT id FROM runtimes WHERE path = ?", (str(rt.path),)).fetchone()
     return row["id"]
 
 

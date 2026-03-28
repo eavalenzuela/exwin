@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -9,16 +10,19 @@ import pytest
 from exwin.backend.config import Config
 from exwin.backend.prefix import create_prefix, delete_prefix, prefix_root, wineprefix_path
 from exwin.backend.runtime import Runtime
+from exwin.models import RuntimeType
 
 
 @pytest.fixture
 def proton_rt() -> Runtime:
-    return Runtime(name="Proton 9", type="proton", path="/opt/proton", version="9.0")
+    return Runtime(
+        name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"), version="9.0"
+    )
 
 
 @pytest.fixture
 def wine_rt() -> Runtime:
-    return Runtime(name="Wine", type="wine", path="/usr", version="wine-9.0")
+    return Runtime(name="Wine", type=RuntimeType.WINE, path=Path("/usr"), version="wine-9.0")
 
 
 class TestPrefixRoot:

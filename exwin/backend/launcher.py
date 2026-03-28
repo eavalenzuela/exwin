@@ -133,7 +133,7 @@ class Launcher:
             GLib.idle_add(on_exit, app_id)
 
     def _build_command(self, app: AppEntry, runtime: Runtime, app_config: AppConfig) -> list[str]:
-        exe_path = Path(app.install_path) / app.exe_path
+        exe_path = app.install_path / app.exe_path
         if not exe_path.exists():
             raise FileNotFoundError(
                 f"Executable not found: {exe_path}\nCheck the executable path in app settings."
@@ -159,7 +159,7 @@ class Launcher:
     def _build_env(self, app: AppEntry, runtime: Runtime, app_config: AppConfig) -> dict[str, str]:
         env = os.environ.copy()
 
-        prefix_root = Path(app.prefix_path)
+        prefix_root = app.prefix_path
 
         if runtime.is_proton:
             env["STEAM_COMPAT_DATA_PATH"] = str(prefix_root)

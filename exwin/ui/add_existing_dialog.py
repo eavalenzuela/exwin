@@ -15,7 +15,7 @@ from gi.repository import Adw, Gio, Gtk  # noqa: E402
 
 from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
-from exwin.models import AppEntry  # noqa: E402
+from exwin.models import AppEntry, AppSource  # noqa: E402
 
 
 def _slugify(name: str) -> str:
@@ -190,8 +190,11 @@ class AddExistingDialog(Adw.Dialog):
             self._show_toast("Please specify an executable")
             return
 
+        install_dir = Path(install_path)
+        prefix_dir = Path(prefix_path) if prefix_path else None
+
         # Resolve exe path
-        full_exe = Path(install_path) / exe_path
+        full_exe = install_dir / exe_path
         if not full_exe.exists():
             self._show_toast(f"Executable not found: {full_exe}")
             return
@@ -204,21 +207,20 @@ class AddExistingDialog(Adw.Dialog):
         runtime_id = runtime.db_id if runtime else None
 
         # Create prefix if not specified
-        if not prefix_path:
+        if not prefix_dir:
             from exwin.backend.prefix import create_prefix
 
             if runtime:
-                proot = create_prefix(app_id, self._config, runtime)
-                prefix_path = str(proot)
+                prefix_dir = create_prefix(app_id, self._config, runtime)
 
         from exwin.db.apps import insert_app
 
         app = AppEntry(
             app_id=app_id,
             name=name,
-            source="manual",
-            install_path=install_path,
-            prefix_path=prefix_path,
+            source=AppSource.MANUAL,
+            install_path=install_dir,
+            prefix_path=prefix_dir,
             exe_path=exe_path,
             runtime_id=runtime_id,
             install_date=datetime.now(tz=UTC).isoformat(),

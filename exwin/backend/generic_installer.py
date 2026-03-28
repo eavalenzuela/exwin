@@ -16,7 +16,7 @@ from exwin.backend.runtime import Runtime
 from exwin.backend.winetricks import is_available as winetricks_available
 from exwin.backend.winetricks import run_verbs
 from exwin.db.apps import insert_app
-from exwin.models import AppEntry
+from exwin.models import AppEntry, AppSource
 
 _SKIP_DIRS = {"__redist", "unins", "uninstall", "setup", "vcredist", "dotnet", "isisetup"}
 _SKIP_EXES = {"unins000.exe", "uninst.exe", "uninstall.exe", "setup.exe"}
@@ -169,7 +169,7 @@ def finalize_generic_install(
     winetricks_verbs: list[str] | None = None,
     on_progress: Callable[[str], None] | None = None,
     app_id_override: str | None = None,
-    source_override: str = "manual",
+    source_override: AppSource = AppSource.MANUAL,
 ) -> AppEntry:
     """Persist a generic Wine-installed app to the library.
 
@@ -182,7 +182,7 @@ def finalize_generic_install(
         arch:      Wine architecture.
         winetricks_verbs: Optional list of verbs to run post-install.
         app_id_override: If set, use this app ID instead of auto-generating one.
-        source_override: Library source tag (default ``"manual"``).
+        source_override: Library source tag (default ``AppSource.MANUAL``).
 
     Returns:
         The newly created :class:`AppEntry`.
@@ -223,8 +223,8 @@ def finalize_generic_install(
         app_id=app_id,
         name=app_name,
         source=source_override,
-        install_path=str(p_root),
-        prefix_path=str(p_root),
+        install_path=p_root,
+        prefix_path=p_root,
         exe_path=exe_rel,
         cover_art_path="",
         install_date=datetime.now(UTC).isoformat(),

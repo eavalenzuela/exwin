@@ -23,8 +23,8 @@ def create_shortcut(app: AppEntry) -> Path:
     dest = _APPLICATIONS_DIR / f"exwin-{app.app_id}.desktop"
 
     icon = (
-        app.cover_art_path
-        if (app.cover_art_path and Path(app.cover_art_path).exists())
+        str(app.cover_art_path)
+        if (app.cover_art_path and app.cover_art_path.exists())
         else "applications-games-symbolic"
     )
     exec_cmd = f"{sys.executable} -m exwin --launch {app.app_id}"

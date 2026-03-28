@@ -295,8 +295,8 @@ class _AppCard(Gtk.Box):
         self.add_css_class("card")
 
         # Cover art
-        if app.cover_art_path and Path(app.cover_art_path).exists():
-            cover: Gtk.Widget = Gtk.Picture.new_for_filename(app.cover_art_path)
+        if app.cover_art_path and app.cover_art_path.exists():
+            cover: Gtk.Widget = Gtk.Picture.new_for_filename(str(app.cover_art_path))
             cover.set_content_fit(Gtk.ContentFit.COVER)  # type: ignore[attr-defined]
         else:
             cover = Gtk.Image()

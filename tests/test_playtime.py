@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from exwin.backend.config import Config
 from exwin.db.apps import get_app, insert_app, update_playtime
-from exwin.models import AppEntry
+from exwin.models import AppEntry, AppSource
 from exwin.ui.library_page import _fmt_playtime
 
 
 def _app(app_id: str = "pt-game") -> AppEntry:
-    return AppEntry(app_id=app_id, name="PT Game", source="gog")
+    return AppEntry(app_id=app_id, name="PT Game", source=AppSource.GOG)
 
 
 class TestUpdatePlaytime:

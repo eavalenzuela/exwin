@@ -11,17 +11,19 @@ from exwin.backend.app_config import AppConfig
 from exwin.backend.config import Config
 from exwin.backend.launcher import Launcher
 from exwin.backend.runtime import Runtime
-from exwin.models import AppEntry
+from exwin.models import AppEntry, AppSource, RuntimeType
 
 
 @pytest.fixture
 def proton_rt() -> Runtime:
-    return Runtime(name="Proton 9", type="proton", path="/opt/proton", version="9.0")
+    return Runtime(
+        name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"), version="9.0"
+    )
 
 
 @pytest.fixture
 def wine_rt() -> Runtime:
-    return Runtime(name="Wine", type="wine", path="/usr", version="wine-9.0")
+    return Runtime(name="Wine", type=RuntimeType.WINE, path=Path("/usr"), version="wine-9.0")
 
 
 @pytest.fixture
@@ -32,9 +34,9 @@ def app(tmp_path: Path) -> AppEntry:
     return AppEntry(
         app_id="test-app",
         name="Test Game",
-        source="manual",
-        install_path=str(install),
-        prefix_path=str(tmp_path / "prefix"),
+        source=AppSource.MANUAL,
+        install_path=install,
+        prefix_path=tmp_path / "prefix",
         exe_path="Game.exe",
     )
 
@@ -94,8 +96,8 @@ class TestBuildCommand:
         bad_app = AppEntry(
             app_id="bad",
             name="Bad",
-            source="manual",
-            install_path="/nonexistent",
+            source=AppSource.MANUAL,
+            install_path=Path("/nonexistent"),
             exe_path="missing.exe",
         )
         with pytest.raises(FileNotFoundError, match="Executable not found"):
@@ -112,14 +114,14 @@ class TestBuildEnv:
         self, launcher: Launcher, app: AppEntry, proton_rt: Runtime, default_cfg: AppConfig
     ) -> None:
         env = launcher.build_env(app, proton_rt, default_cfg)
-        assert env["STEAM_COMPAT_DATA_PATH"] == app.prefix_path
+        assert env["STEAM_COMPAT_DATA_PATH"] == str(app.prefix_path)
         assert "WINEPREFIX" not in env
 
     def test_wine_sets_wineprefix(
         self, launcher: Launcher, app: AppEntry, wine_rt: Runtime, default_cfg: AppConfig
     ) -> None:
         env = launcher.build_env(app, wine_rt, default_cfg)
-        assert env["WINEPREFIX"] == app.prefix_path
+        assert env["WINEPREFIX"] == str(app.prefix_path)
         assert "STEAM_COMPAT_DATA_PATH" not in env
 
     def test_sets_winearch(self, launcher: Launcher, app: AppEntry, wine_rt: Runtime) -> None:

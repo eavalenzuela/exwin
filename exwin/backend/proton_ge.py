@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tarfile
 import tempfile
@@ -40,6 +41,48 @@ def find_ge_proton_asset(release: dict) -> dict:
     raise RuntimeError(f"No .tar.gz asset found in release {release.get('tag_name', '?')}")
 
 
+def _find_sha512_asset(release: dict) -> dict | None:
+    """Return the .sha512sum asset from a release, or None if absent."""
+    for asset in release.get("assets", []):
+        name: str = asset.get("name", "")
+        if name.endswith(".sha512sum"):
+            return asset
+    return None
+
+
+def _verify_sha512(tarball: Path, release: dict) -> None:
+    """Download the .sha512sum asset and verify *tarball* against it.
+
+    Raises :exc:`RuntimeError` on checksum mismatch.  Silently returns if
+    no .sha512sum asset is available in the release.
+    """
+    sha_asset = _find_sha512_asset(release)
+    if sha_asset is None:
+        return
+
+    req = urllib.request.Request(
+        sha_asset["browser_download_url"], headers={"User-Agent": "exwin/1.0"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        line = resp.read().decode().strip()
+
+    # Format: "<hex_hash>  <filename>" or "<hex_hash> <filename>"
+    expected_hash = line.split()[0].lower()
+
+    sha = hashlib.sha512()
+    with open(tarball, "rb") as f:
+        while chunk := f.read(65536):
+            sha.update(chunk)
+    actual_hash = sha.hexdigest()
+
+    if actual_hash != expected_hash:
+        raise RuntimeError(
+            f"SHA-512 checksum mismatch for {tarball.name}\n"
+            f"  expected: {expected_hash}\n"
+            f"  got:      {actual_hash}"
+        )
+
+
 def download_and_install(
     release: dict,
     dest_dir: Path = _DEFAULT_DEST,
@@ -75,6 +118,8 @@ def download_and_install(
                 downloaded += len(chunk)
                 if on_progress:
                     on_progress(downloaded, total)
+
+        _verify_sha512(tarball, release)
 
         with tarfile.open(tarball) as tf:
             resolved_dest = dest_dir.resolve()

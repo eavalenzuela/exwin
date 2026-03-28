@@ -9,16 +9,19 @@ import pytest
 
 from exwin.backend.runtime import Runtime
 from exwin.backend.winetricks import is_available, run_verbs
+from exwin.models import RuntimeType
 
 
 @pytest.fixture
 def proton_rt() -> Runtime:
-    return Runtime(name="Proton 9", type="proton", path="/opt/proton", version="9.0")
+    return Runtime(
+        name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"), version="9.0"
+    )
 
 
 @pytest.fixture
 def wine_rt() -> Runtime:
-    return Runtime(name="Wine", type="wine", path="/usr", version="wine-9.0")
+    return Runtime(name="Wine", type=RuntimeType.WINE, path=Path("/usr"), version="wine-9.0")
 
 
 class TestIsAvailable:

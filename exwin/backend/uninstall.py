@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable
-from pathlib import Path
 
 from exwin.backend.config import Config
 from exwin.db.apps import delete_app
@@ -31,14 +30,12 @@ def uninstall_app(
             on_progress(msg)
 
     if delete_files:
-        install = Path(app.install_path) if app.install_path else None
-        prefix = Path(app.prefix_path) if app.prefix_path else None
-        if install and install.exists():
-            shutil.rmtree(install, ignore_errors=True)
-            _log(f"Deleted: {install}")
-        if prefix and prefix != install and prefix.exists():
-            shutil.rmtree(prefix, ignore_errors=True)
-            _log(f"Deleted: {prefix}")
+        if app.install_path and app.install_path.exists():
+            shutil.rmtree(app.install_path, ignore_errors=True)
+            _log(f"Deleted: {app.install_path}")
+        if app.prefix_path and app.prefix_path != app.install_path and app.prefix_path.exists():
+            shutil.rmtree(app.prefix_path, ignore_errors=True)
+            _log(f"Deleted: {app.prefix_path}")
 
     metadata_dir = config.metadata_dir / app.app_id
     shutil.rmtree(metadata_dir, ignore_errors=True)

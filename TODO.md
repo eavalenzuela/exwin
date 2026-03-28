@@ -15,19 +15,19 @@
 
 - [x] **Headless launch doesn't write to log file** — Now writes stdout/stderr to `logs/<app_id>.log`.
 - [x] **Race in `_watch()` + `stop()`** — `_watch()` now checks `was_tracked` after pop; skips playtime/callback if already removed.
-- [ ] **Magic strings for source/type** — `"gog"`, `"manual"`, `"proton"`, `"wine"` scattered as raw strings. Use `StrEnum` to catch typos and improve IDE support.
-- [ ] **Path type inconsistency** — Some functions return `str` (AppEntry, DB), others return `Path` (Config, backend). Standardize on `Path` internally, convert to `str` only at DB boundary.
+- [x] **Magic strings for source/type** — `AppSource` and `RuntimeType` `StrEnum` types in `models.py`; all raw strings replaced throughout codebase and tests.
+- [x] **Path type inconsistency** — `AppEntry` path fields (`install_path`, `prefix_path`, `cover_art_path`) now `Path | None`; `Runtime.path` now `Path`. Conversion to `str` only at DB boundary (`db/apps.py`, `db/runtimes.py`).
 - [x] **Blocking operations on GTK main thread** — Shortcut creation, save backup, and restore now run in background threads with button disable/re-enable.
-- [ ] **No Proton-GE SHA512 verification** — `proton_ge.py` downloads `.tar.gz` without checking the `.sha512sum` asset. VKD3D-Proton tarballs also have no integrity check.
+- [x] **No Proton-GE SHA512 verification** — `_verify_sha512()` downloads `.sha512sum` asset and verifies tarball hash before extraction. No-op if asset absent.
 - [x] **No exe_path validation at launch time** — `_build_command()` now raises `FileNotFoundError` with a clear message if the exe doesn't exist.
 - [x] **Cover art error CSS not cleared** — `"error"` CSS class now removed from cover row before retrying save.
 
 ### Low Priority
 
-- [ ] **Regex patterns not compiled** — `gog_installer.py` uses `re.search`/`re.match` in loops without precompilation.
-- [ ] **File descriptor leak in launcher** — `launcher.py:62` opens log_file in `launch()`, closed in `_watch()` on daemon thread. If thread dies, file never closes.
-- [ ] **`install_dialog.py` is 784 lines** — Largest file by far. GOG flow and generic Wine flow share a dialog but have different state machines. Split into separate modules or extract page builders.
-- [ ] **Config._ensure_dirs() silently skips storage root** — If external drive is unmounted, later code still assumes `installs_dir` is writable. Should warn or error.
+- [x] **Regex patterns not compiled** — `gog_installer.py` now uses module-level compiled patterns (`_RE_INSPECTING`, `_RE_DATA_VERSION`, `_RE_GAME_ID`, `_RE_LANGUAGE`, `_RE_NON_WORD`).
+- [x] **File descriptor leak in launcher** — `launcher.py:_watch()` now uses try/finally to guarantee `log_file.close()` and `_running` dict cleanup even if the thread dies.
+- [x] **`install_dialog.py` is 784 lines** — Page builders extracted to `install_pages.py` (454 lines); `install_dialog.py` reduced to 611 lines (handlers + coordination only).
+- [x] **Config._ensure_dirs() silently skips storage root** — Now logs a warning via `logging.warning()` when storage root dirs are not writable. Added `storage_root_available` property. SettingsPage shows an `Adw.Banner` when unavailable.
 
 ---
 

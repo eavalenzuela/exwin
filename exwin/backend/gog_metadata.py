@@ -77,7 +77,7 @@ def apply_metadata(
         cover_dst = meta_dir / "cover.jpg"
         try:
             _download_image(cover_url, cover_dst)
-            update_cover_art(app_id, str(cover_dst))
+            update_cover_art(app_id, cover_dst)
             _log("Cover art updated from GOG CDN.")
         except Exception as exc:
             _log(f"Cover art download failed: {exc}")
@@ -134,5 +134,5 @@ def apply_custom_cover_art(app_id: str, source: str, config: Config) -> str:
             raise FileNotFoundError(f"File not found: {source}")
         shutil.copy2(src, dst)
 
-    update_cover_art(app_id, str(dst))
+    update_cover_art(app_id, dst)
     return str(dst)

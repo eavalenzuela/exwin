@@ -8,7 +8,7 @@ from pathlib import Path
 
 from exwin.backend.config import Config
 from exwin.db.apps import get_app, insert_app
-from exwin.models import AppEntry
+from exwin.models import AppEntry, AppSource
 
 
 def _run(args: list[str], data_dir: Path) -> subprocess.CompletedProcess:
@@ -32,7 +32,7 @@ def _app(
     return AppEntry(
         app_id=app_id,
         name="CLI Game",
-        source="gog",
+        source=AppSource.GOG,
         install_path=install_path,
         prefix_path=prefix_path,
     )
@@ -104,7 +104,7 @@ class TestMigrateCommand:
         app = AppEntry(
             app_id="gog-migrate",
             name="Migrate Game",
-            source="gog",
+            source=AppSource.GOG,
             install_path=str(install_dir),
             prefix_path=str(install_dir),
         )

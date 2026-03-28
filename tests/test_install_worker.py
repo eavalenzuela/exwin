@@ -10,14 +10,14 @@ import pytest
 
 from exwin.backend.config import Config
 from exwin.backend.runtime import Runtime
-from exwin.models import AppEntry
+from exwin.models import AppEntry, AppSource, RuntimeType
 
 
 @pytest.fixture
 def proton_rt(db: Config) -> Runtime:
     from exwin.db.runtimes import upsert_runtime
 
-    rt = Runtime(name="Proton 9", type="proton", path="/opt/proton", version="9.0")
+    rt = Runtime(name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"), version="9.0")
     db_id = upsert_runtime(rt)
     return Runtime(name=rt.name, type=rt.type, path=rt.path, version=rt.version, db_id=db_id)
 
@@ -96,7 +96,7 @@ class TestInstallGog:
 
         assert app.app_id == "gog-1234567890"
         assert app.name == "Test Game"
-        assert app.source == "gog"
+        assert app.source == AppSource.GOG
         assert app.exe_path == "Game.exe"
 
     def test_raises_if_already_installed(
@@ -138,9 +138,9 @@ class TestInstallGogDlc:
         base_app = AppEntry(
             app_id="base-game",
             name="Base Game",
-            source="gog",
-            install_path=str(base_install),
-            prefix_path=str(db.prefixes_dir / "base-game"),
+            source=AppSource.GOG,
+            install_path=base_install,
+            prefix_path=db.prefixes_dir / "base-game",
         )
 
         extracted_files = []

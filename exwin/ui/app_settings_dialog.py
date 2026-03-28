@@ -37,7 +37,9 @@ class AppSettingsDialog(Adw.Dialog):
         runtimes: list[Runtime] | None = None,
         **kwargs,
     ) -> None:
-        super().__init__(title=f"{app.name} — Settings", content_width=520, content_height=560, **kwargs)
+        super().__init__(
+            title=f"{app.name} — Settings", content_width=520, content_height=560, **kwargs
+        )
         self._app = app
         self._app_config = app_config
         self._config = config
@@ -243,7 +245,7 @@ class AppSettingsDialog(Adw.Dialog):
         prefs.add(group)
 
         self._cover_row = Adw.EntryRow(title="Local path or URL")
-        self._cover_row.set_text(app.cover_art_path or "")
+        self._cover_row.set_text(str(app.cover_art_path) if app.cover_art_path else "")
 
         browse_btn = Gtk.Button(icon_name="document-open-symbolic")
         browse_btn.add_css_class("flat")
@@ -330,7 +332,7 @@ class AppSettingsDialog(Adw.Dialog):
 
         dialog = Gtk.FileDialog(title="Select Executable", filters=filters)
         # Start browsing from the install directory if it exists
-        start = Path(self._app.install_path) if self._app.install_path else Path.home()
+        start = self._app.install_path if self._app.install_path else Path.home()
         if start.exists():
             from gi.repository import Gio as _Gio
 
@@ -347,7 +349,7 @@ class AppSettingsDialog(Adw.Dialog):
             return
 
         chosen = Path(gfile.get_path())
-        install = Path(self._app.install_path) if self._app.install_path else None
+        install = self._app.install_path
         if install:
             try:
                 rel = chosen.relative_to(install)
@@ -387,7 +389,7 @@ class AppSettingsDialog(Adw.Dialog):
             update_runtime(self._app.app_id, selected_rt.db_id)
 
         cover_source = self._cover_row.get_text().strip()
-        current_cover = self._app.cover_art_path or ""
+        current_cover = str(self._app.cover_art_path) if self._app.cover_art_path else ""
         if cover_source and cover_source != current_cover:
             self._cover_row.remove_css_class("error")
             _btn.set_sensitive(False)
@@ -513,9 +515,7 @@ class AppSettingsDialog(Adw.Dialog):
         self._apply_wt_btn.set_sensitive(False)
         self._apply_wt_btn.set_label("Applying…")
 
-        from pathlib import Path as _Path
-
-        p_root = _Path(self._app.prefix_path)
+        p_root = self._app.prefix_path
         threading.Thread(
             target=self._winetricks_thread,
             args=(p_root, verbs),

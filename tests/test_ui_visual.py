@@ -9,7 +9,6 @@ Run:  xvfb-run .venv/bin/pytest tests/test_ui_visual.py -v
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -42,15 +41,15 @@ def _ensure_gtk() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_app_entry(**overrides) -> "AppEntry":
-    from exwin.models import AppEntry
+def _make_app_entry(**overrides) -> AppEntry:
+    from exwin.models import AppEntry, AppSource
 
     defaults = dict(
         app_id="test-game-1",
         name="Test Game With a Reasonably Long Title",
-        source="gog",
-        install_path="/tmp/exwin-test/apps/test-game-1",
-        prefix_path="/tmp/exwin-test/prefixes/test-game-1",
+        source=AppSource.GOG,
+        install_path=Path("/tmp/exwin-test/apps/test-game-1"),
+        prefix_path=Path("/tmp/exwin-test/prefixes/test-game-1"),
         exe_path="game.exe",
         cover_art_path="",
         description="A test game used for visual layout validation.",
@@ -64,18 +63,19 @@ def _make_app_entry(**overrides) -> "AppEntry":
     return AppEntry(**defaults)
 
 
-def _make_runtime() -> "Runtime":
+def _make_runtime() -> Runtime:
     from exwin.backend.runtime import Runtime
+    from exwin.models import RuntimeType
 
     return Runtime(
         name="Proton-GE 9-1",
-        type="proton",
-        path="/home/user/.steam/root/compatibilitytools.d/GE-Proton9-1",
+        type=RuntimeType.PROTON,
+        path=Path("/home/user/.steam/root/compatibilitytools.d/GE-Proton9-1"),
         version="9-1",
     )
 
 
-def _make_config(tmp_path: Path) -> "Config":
+def _make_config(tmp_path: Path) -> Config:
     from exwin.backend.config import Config
 
     cfg = Config(data_dir=tmp_path / "exwin")
@@ -92,7 +92,7 @@ def _pump_events(iterations: int = 50) -> None:
         ctx.iteration(False)
 
 
-def _realize_in_window(widget, *, width: int = 1100, height: int = 700) -> "Gtk.Window":
+def _realize_in_window(widget, *, width: int = 1100, height: int = 700) -> Gtk.Window:
     """Place a widget in a temporary window and realize it for measurement."""
     from gi.repository import Gtk
 
@@ -174,9 +174,13 @@ def _check_widget_tree(widget, *, path: str = "", issues: list | None = None) ->
     _min_h, nat_h, _mb_h, _nb_h = widget.measure(Gtk.Orientation.VERTICAL, -1)
 
     if nat_w > 0 and w == 0:
-        issues.append(VisualIssue(full_path, "zero width allocation", f"natural={nat_w}, alloc={w}"))
+        issues.append(
+            VisualIssue(full_path, "zero width allocation", f"natural={nat_w}, alloc={w}")
+        )
     if nat_h > 0 and h == 0:
-        issues.append(VisualIssue(full_path, "zero height allocation", f"natural={nat_h}, alloc={h}"))
+        issues.append(
+            VisualIssue(full_path, "zero height allocation", f"natural={nat_h}, alloc={h}")
+        )
 
     # Check for severely clipped content (allocated < 30% of natural size)
     if nat_w > 100 and w > 0 and w < nat_w * 0.3:
@@ -496,14 +500,11 @@ class TestLibraryPageVisual:
         assert page is not None
 
     def test_page_with_apps_has_natural_size(self) -> None:
-        from gi.repository import Gtk
 
         from exwin.ui.library_page import LibraryPage
 
         page = LibraryPage(on_app_activated=lambda a: None)
-        apps = [
-            _make_app_entry(app_id=f"game-{i}", name=f"Game {i}") for i in range(6)
-        ]
+        apps = [_make_app_entry(app_id=f"game-{i}", name=f"Game {i}") for i in range(6)]
         page.populate(apps)
 
         win = _realize_in_window(page)
@@ -557,12 +558,13 @@ class TestExwinWindowVisual:
         # which naturally have zero allocation when not visible.
         issues = _check_widget_tree(win)
         critical = [
-            i for i in issues
+            i
+            for i in issues
             if "zero" in i.issue
             and "/GtkStack/" not in i.widget_name  # inactive stack pages
             and "/GtkDropDown/" not in i.widget_name  # dropdown internals
         ]
-        assert not critical, f"Widgets with zero allocation:\n" + "\n".join(str(i) for i in critical)
+        assert not critical, "Widgets with zero allocation:\n" + "\n".join(str(i) for i in critical)
 
         win.destroy()
         _pump_events()

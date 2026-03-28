@@ -10,11 +10,11 @@ import pytest
 from exwin.backend.app_config import AppConfig
 from exwin.backend.config import Config
 from exwin.backend.saves import backup_saves, list_backups, restore_saves
-from exwin.models import AppEntry
+from exwin.models import AppEntry, AppSource
 
 
 def _app(app_id: str = "save-game") -> AppEntry:
-    return AppEntry(app_id=app_id, name="Save Game", source="gog")
+    return AppEntry(app_id=app_id, name="Save Game", source=AppSource.GOG)
 
 
 def _cfg(save_path: str) -> AppConfig:

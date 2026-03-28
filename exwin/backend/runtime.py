@@ -8,6 +8,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from exwin.models import RuntimeType
+
 # Canonical scan roots — ~/.steam/root is a distro-agnostic symlink to the
 # actual Steam installation (debian-installation, steam, etc.)
 _FLATPAK_STEAM = Path.home() / ".var" / "app" / "com.valvesoftware.Steam" / "data" / "Steam"
@@ -25,33 +27,33 @@ _PROTON_SCAN_ROOTS: list[Path] = [
 @dataclass
 class Runtime:
     name: str
-    type: str  # "proton" | "wine"
-    path: str  # Proton: root dir of runtime; Wine: prefix of the installation (e.g. /usr)
+    type: RuntimeType
+    path: Path  # Proton: root dir of runtime; Wine: prefix of the installation (e.g. /usr)
     version: str = ""
     db_id: int | None = field(default=None, compare=False)
 
     @property
     def is_proton(self) -> bool:
-        return self.type == "proton"
+        return self.type == RuntimeType.PROTON
 
     @property
     def proton_binary(self) -> Path:
-        return Path(self.path) / "proton"
+        return self.path / "proton"
 
     @property
     def wine_binary(self) -> Path:
         if self.is_proton:
             # Proton bundles wine at files/bin/wine
-            return Path(self.path) / "files" / "bin" / "wine"
-        return Path(self.path) / "bin" / "wine"
+            return self.path / "files" / "bin" / "wine"
+        return self.path / "bin" / "wine"
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Runtime:
         return cls(
             db_id=row["id"],
             name=row["name"],
-            type=row["type"],
-            path=row["path"],
+            type=RuntimeType(row["type"]),
+            path=Path(row["path"]),
             version=row["version"] or "",
         )
 
@@ -62,7 +64,7 @@ class Runtime:
 def scan_runtimes() -> list[Runtime]:
     """Detect all available Proton and Wine runtimes on the system."""
     found: list[Runtime] = []
-    seen_paths: set[str] = set()
+    seen_paths: set[Path] = set()
 
     # ── Proton ──────────────────────────────────────────────────────────
     for root in _PROTON_SCAN_ROOTS:
@@ -74,15 +76,15 @@ def scan_runtimes() -> list[Runtime]:
             proton_bin = entry / "proton"
             if not proton_bin.is_file():
                 continue
-            path_str = str(entry.resolve())
-            if path_str in seen_paths:
+            resolved = entry.resolve()
+            if resolved in seen_paths:
                 continue
-            seen_paths.add(path_str)
+            seen_paths.add(resolved)
             found.append(
                 Runtime(
                     name=entry.name,
-                    type="proton",
-                    path=path_str,
+                    type=RuntimeType.PROTON,
+                    path=resolved,
                     version=_read_proton_version(entry),
                 )
             )
@@ -91,13 +93,13 @@ def scan_runtimes() -> list[Runtime]:
     wine_exe = shutil.which("wine")
     if wine_exe:
         # Derive install prefix: /usr/bin/wine → /usr
-        prefix = str(Path(wine_exe).resolve().parent.parent)
+        prefix = Path(wine_exe).resolve().parent.parent
         if prefix not in seen_paths:
             seen_paths.add(prefix)
             found.append(
                 Runtime(
                     name=f"Wine ({_read_wine_version(wine_exe)})",
-                    type="wine",
+                    type=RuntimeType.WINE,
                     path=prefix,
                     version=_read_wine_version(wine_exe),
                 )

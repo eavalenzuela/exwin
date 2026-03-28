@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 # Disable all libadwaita/GTK animations so dialogs appear instantly
 os.environ["ADW_DISABLE_ANIMATIONS"] = "1"
@@ -20,7 +19,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gdk, GLib, Graphene, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Graphene, Gtk  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Bootstrap
@@ -125,9 +124,8 @@ def _screenshot_dialog_in_window(
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from exwin.backend.app_config import AppConfig, load_app_config  # noqa: E402
+from exwin.backend.app_config import load_app_config  # noqa: E402
 from exwin.backend.config import Config  # noqa: E402
-from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.db.apps import get_all_apps  # noqa: E402
 from exwin.db.runtimes import get_all_runtimes, sync_runtimes  # noqa: E402
 from exwin.db.schema import init_db  # noqa: E402
@@ -152,7 +150,9 @@ if not balrum:
     sys.exit(1)
 
 print(f"\nUsing app: {balrum.name} ({balrum.app_id})")
-runtime = next((r for r in runtimes if r.db_id == balrum.runtime_id), runtimes[0] if runtimes else None)
+runtime = next(
+    (r for r in runtimes if r.db_id == balrum.runtime_id), runtimes[0] if runtimes else None
+)
 app_config = load_app_config(balrum.app_id, cfg)
 
 
@@ -291,7 +291,7 @@ if not log_path.exists():
         "STEAM_COMPAT_DATA_PATH=/games/games/exwin/prefixes/gog-1769415595\n"
         "Running: /path/to/proton run Balrum.exe\n"
         "fsync: up and running.\n"
-        "wine: configuration in L\"C:\\\\users\\\\steamuser\" has been updated.\n"
+        'wine: configuration in L"C:\\\\users\\\\steamuser" has been updated.\n'
         "Game process exited with code 0\n"
     )
 

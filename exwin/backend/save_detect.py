@@ -15,8 +15,8 @@ def detect_save_paths(app: AppEntry) -> list[Path]:
     """
     results: list[Path] = []
 
-    prefix = Path(app.prefix_path) if app.prefix_path else None
-    install = Path(app.install_path) if app.install_path else None
+    prefix = app.prefix_path
+    install = app.install_path
 
     if prefix:
         # Proton uses pfx/ subdirectory; plain Wine uses the root directly
