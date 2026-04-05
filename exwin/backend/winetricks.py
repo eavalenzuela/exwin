@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import IO, Any
 
 from exwin.backend.runtime import Runtime
 
@@ -20,6 +21,8 @@ def run_verbs(
     runtime: Runtime | None = None,
     *,
     unattended: bool = True,
+    stdout: IO[Any] | int | None = None,
+    stderr: IO[Any] | int | None = None,
 ) -> subprocess.Popen:
     """Spawn winetricks to install *verbs* into *prefix_root*.
 
@@ -30,6 +33,10 @@ def run_verbs(
         runtime:     Optional runtime; if a Proton runtime is provided its
                      bundled wine/wineserver binaries are used.
         unattended:  Pass --unattended to suppress GUI installers.
+        stdout:      File object or subprocess constant for the child's stdout.
+                     Defaults to inheriting from the parent.
+        stderr:      Same as stdout for stderr.  Pass ``subprocess.STDOUT`` to
+                     merge stderr into stdout.
 
     Returns:
         The spawned Popen object.  Callers are responsible for waiting on it.
@@ -60,4 +67,4 @@ def run_verbs(
         cmd.append("--unattended")
     cmd.extend(verbs)
 
-    return subprocess.Popen(cmd, env=env)
+    return subprocess.Popen(cmd, env=env, stdout=stdout, stderr=stderr)

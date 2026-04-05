@@ -8,6 +8,7 @@ runs in a background thread so the UI stays responsive.
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -393,13 +394,32 @@ class AddExistingDialog(Adw.Dialog):
                     _log("Warning: winetricks not found — skipping verb installation.")
                 else:
                     _log(f"Applying winetricks: {' '.join(verbs)}")
-                    proc = run_verbs(prefix_dir, verbs, runtime)
-                    proc.wait()
+                    log_path = self._config.logs_dir / f"{app_id}-winetricks.log"
+                    log_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(log_path, "w") as log_file:
+                        proc = run_verbs(
+                            prefix_dir,
+                            verbs,
+                            runtime,
+                            stdout=log_file,
+                            stderr=subprocess.STDOUT,
+                        )
+                        proc.wait()
                     rc = proc.returncode
-                    _log(
-                        f"winetricks finished (exit code {rc})"
-                        f"{'.' if rc == 0 else ' — check logs for errors.'}"
-                    )
+                    if rc == 0:
+                        _log(f"winetricks finished (exit code 0). Log: {log_path}")
+                    else:
+                        _log(f"winetricks failed (exit code {rc}). Full log at: {log_path}")
+                        # Tail the log into the dialog so the user can see what went wrong
+                        try:
+                            tail = log_path.read_text(errors="replace").splitlines()[-30:]
+                            if tail:
+                                _log("── winetricks output (last 30 lines) ──")
+                                for line in tail:
+                                    _log(line)
+                                _log("──────────────────────────────────────")
+                        except OSError:
+                            pass
 
             # 3. DXVK
             if install_dxvk_flag:

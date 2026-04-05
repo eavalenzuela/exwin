@@ -143,7 +143,10 @@ class Launcher:
         exe_full = str(exe_path)
 
         if runtime.is_proton:
-            cmd = [str(runtime.proton_binary), "run", exe_full]
+            # Use waitforexitandrun so ProtonFixes' check_conditions() triggers
+            # (it requires 'waitforexitandrun' in sys.argv[1]).  Plain `run`
+            # bypasses game-specific fixes that many titles need to launch.
+            cmd = [str(runtime.proton_binary), "waitforexitandrun", exe_full]
         else:
             cmd = [str(runtime.wine_binary), exe_full]
 
