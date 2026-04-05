@@ -171,6 +171,12 @@ class Launcher:
             env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = (
                 str(_STEAM_ROOT) if _STEAM_ROOT.exists() else ""
             )
+            # ProtonFixes' get_game_id() reads SteamAppId / SteamGameId, then
+            # falls back to digits in STEAM_COMPAT_DATA_PATH.  Our prefix paths
+            # have no digits, so fall-back raises IndexError.  Setting 0 marks
+            # this as a non-Steam game; ProtonFixes will find no fix to apply.
+            env.setdefault("SteamAppId", "0")
+            env.setdefault("SteamGameId", "0")
             # WINEPREFIX is managed by Proton (it uses pfx/ inside compat data)
         else:
             env["WINEPREFIX"] = str(prefix_root)
