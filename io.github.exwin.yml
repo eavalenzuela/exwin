@@ -10,7 +10,7 @@ finish-args:
   - --socket=fallback-x11
   - --share=network              # GOG metadata, Proton-GE downloads
   - --device=dri                 # GPU access
-  - --filesystem=home            # game files, Steam/Proton in ~/.steam, prefixes, ~/.local/bin
+  - --filesystem=host            # game files anywhere on host, Steam/Proton, prefixes, external drives
   - --filesystem=host-os         # reach system tools at /run/host/usr/bin (wine, innoextract)
   - --filesystem=xdg-data/applications:create  # write desktop shortcuts
   - --env=PATH=/app/bin:/usr/bin:/run/host/usr/bin:/run/host/usr/local/bin
