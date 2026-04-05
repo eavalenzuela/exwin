@@ -38,6 +38,7 @@ finish-args:
   - --share=ipc
   - --socket=wayland
   - --socket=fallback-x11
+  - --socket=pulseaudio          # audio for game playback
   - --share=network              # GOG metadata, Proton-GE downloads
   - --device=dri                 # GPU access
   - --allow=multiarch            # required: Flatpak's default seccomp kills 32-bit exes with SIGSYS
