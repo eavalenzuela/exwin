@@ -8,7 +8,13 @@ from unittest.mock import patch
 import pytest
 
 from exwin.backend.config import Config
-from exwin.backend.prefix import create_prefix, delete_prefix, prefix_root, wineprefix_path
+from exwin.backend.prefix import (
+    create_prefix,
+    delete_prefix,
+    prefix_root,
+    rebuild_prefix,
+    wineprefix_path,
+)
 from exwin.backend.runtime import Runtime
 from exwin.models import RuntimeType
 
@@ -42,11 +48,23 @@ class TestWineprefixPath:
 
 
 class TestCreatePrefix:
-    def test_proton_creates_dir_only(self, tmp_config: Config, proton_rt: Runtime) -> None:
-        root = create_prefix("test-app", tmp_config, proton_rt)
+    def test_proton_creates_dir_and_runs_init(self, tmp_config: Config, proton_rt: Runtime) -> None:
+        with patch("exwin.backend.prefix._init_proton_prefix") as mock_init:
+            root = create_prefix("test-app", tmp_config, proton_rt)
         assert root.is_dir()
-        # Proton doesn't run wineboot — just creates the directory
         assert root == tmp_config.prefixes_dir / "test-app"
+        # Missing 'version' marker → Proton init must run
+        mock_init.assert_called_once_with(root, proton_rt)
+
+    def test_proton_skips_init_when_version_exists(
+        self, tmp_config: Config, proton_rt: Runtime
+    ) -> None:
+        root = tmp_config.prefixes_dir / "test-app"
+        root.mkdir(parents=True)
+        (root / "version").write_text("proton-9.0\n")
+        with patch("exwin.backend.prefix._init_proton_prefix") as mock_init:
+            create_prefix("test-app", tmp_config, proton_rt)
+        mock_init.assert_not_called()
 
     def test_wine_calls_wineboot(self, tmp_config: Config, wine_rt: Runtime) -> None:
         with patch("exwin.backend.prefix.subprocess.run") as mock_run:
@@ -70,8 +88,9 @@ class TestCreatePrefix:
         assert env["WINEARCH"] == "win32"
 
     def test_idempotent(self, tmp_config: Config, proton_rt: Runtime) -> None:
-        root1 = create_prefix("test-app", tmp_config, proton_rt)
-        root2 = create_prefix("test-app", tmp_config, proton_rt)
+        with patch("exwin.backend.prefix._init_proton_prefix"):
+            root1 = create_prefix("test-app", tmp_config, proton_rt)
+            root2 = create_prefix("test-app", tmp_config, proton_rt)
         assert root1 == root2
 
 
@@ -88,3 +107,18 @@ class TestDeletePrefix:
     def test_noop_when_not_exists(self, tmp_config: Config) -> None:
         # Should not raise
         delete_prefix("nonexistent-app", tmp_config)
+
+
+class TestRebuildPrefix:
+    def test_wipes_and_recreates(self, tmp_config: Config, proton_rt: Runtime) -> None:
+        root = tmp_config.prefixes_dir / "test-app"
+        root.mkdir(parents=True)
+        (root / "marker").write_text("old prefix contents")
+
+        with patch("exwin.backend.prefix._init_proton_prefix") as mock_init:
+            result = rebuild_prefix("test-app", tmp_config, proton_rt)
+
+        assert result == root
+        assert root.is_dir()
+        assert not (root / "marker").exists()
+        mock_init.assert_called_once()

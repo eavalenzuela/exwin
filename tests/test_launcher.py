@@ -62,7 +62,7 @@ class TestBuildCommand:
     ) -> None:
         cmd = launcher.build_command(app, proton_rt, default_cfg)
         assert cmd[0] == "/opt/proton/proton"
-        assert cmd[1] == "run"
+        assert cmd[1] == "waitforexitandrun"
         assert cmd[2].endswith("Game.exe")
 
     def test_wine_command(

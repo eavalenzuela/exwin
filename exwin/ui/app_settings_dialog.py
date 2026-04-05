@@ -312,6 +312,15 @@ class AppSettingsDialog(Adw.Dialog):
             self._apply_wt_btn.connect("clicked", self._on_apply_winetricks)
             bar.pack_start(self._apply_wt_btn)
 
+        self._rebuild_btn = Gtk.Button(label="Rebuild Prefix")
+        self._rebuild_btn.add_css_class("flat")
+        self._rebuild_btn.set_tooltip_text(
+            "Delete and recreate the Wine prefix from scratch. "
+            "Installed winetricks verbs and DLLs will be lost."
+        )
+        self._rebuild_btn.connect("clicked", self._on_rebuild_prefix)
+        bar.pack_start(self._rebuild_btn)
+
         save_btn = Gtk.Button(label="Save")
         save_btn.add_css_class("suggested-action")
         save_btn.add_css_class("pill")
@@ -556,6 +565,56 @@ class AppSettingsDialog(Adw.Dialog):
             else:
                 msg = f"Winetricks failed — see {log_path}"
             root.show_toast(msg)
+
+    def _on_rebuild_prefix(self, _btn: Gtk.Button) -> None:
+        if self._runtime is None:
+            root = self.get_root()
+            if hasattr(root, "show_toast"):
+                root.show_toast("No runtime selected — assign one first")
+            return
+
+        dialog = Adw.AlertDialog(
+            heading="Rebuild Wine Prefix?",
+            body=(
+                "This deletes and recreates the Wine prefix from scratch. "
+                "Any winetricks verbs, DLL overrides, or other state inside "
+                "the prefix will be lost. Game files and save files stored "
+                "outside the prefix are unaffected."
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("rebuild", "Rebuild")
+        dialog.set_response_appearance("rebuild", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.connect("response", self._on_rebuild_confirmed)
+        dialog.present(self)
+
+    def _on_rebuild_confirmed(self, _dialog: Adw.AlertDialog, response: str) -> None:
+        if response != "rebuild":
+            return
+        self._rebuild_btn.set_sensitive(False)
+        self._rebuild_btn.set_label("Rebuilding…")
+        threading.Thread(target=self._rebuild_thread, daemon=True).start()
+
+    def _rebuild_thread(self) -> None:
+        from exwin.backend.prefix import rebuild_prefix
+
+        err: str | None = None
+        try:
+            rebuild_prefix(self._app.app_id, self._config, self._runtime, self._app_config.arch)
+        except Exception as exc:
+            err = str(exc)
+        GLib.idle_add(self._on_rebuild_done, err)
+
+    def _on_rebuild_done(self, err: str | None) -> None:
+        self._rebuild_btn.set_sensitive(True)
+        self._rebuild_btn.set_label("Rebuild Prefix")
+        root = self.get_root()
+        if hasattr(root, "show_toast"):
+            if err:
+                root.show_toast(f"Prefix rebuild failed: {err}")
+            else:
+                root.show_toast("Prefix rebuilt")
 
     def _snapshot(self) -> dict:
         """Capture current field values for dirty comparison."""
