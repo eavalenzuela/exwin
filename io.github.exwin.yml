@@ -4,16 +4,54 @@ runtime-version: '48'
 sdk: org.gnome.Sdk
 command: exwin
 
+# 32-bit compat + GL extensions so Proton's 32-bit `wine` binary can run.
+# Without these, /lib/i386-linux-gnu/ld-linux.so.2 is missing and any 32-bit
+# Windows .exe fails to launch through Proton.
+add-extensions:
+  org.freedesktop.Platform.Compat.i386:
+    directory: lib/i386-linux-gnu
+    version: '24.08'
+    add-ld-path: lib
+    no-autodownload: false
+    autodelete: false
+
+  org.freedesktop.Platform.Compat.i386.Debug:
+    directory: lib/debug/lib/i386-linux-gnu
+    version: '24.08'
+    autodelete: true
+    no-autodownload: true
+
+  org.freedesktop.Platform.GL32:
+    directory: lib/i386-linux-gnu/GL
+    subdirectories: true
+    versions: '24.08;24.08extra;1.4'
+    version: '1.4'
+    no-autodownload: true
+    autodelete: false
+    add-ld-path: lib
+    merge-dirs: vulkan/icd.d;glvnd/egl_vendor.d;egl/egl_external_platform.d;OpenCL/vendors;lib/dri;lib/d3d;lib/gbm;vulkan/explicit_layer.d;vulkan/implicit_layer.d;vdpau
+    download-if: active-gl-driver
+    enable-if: active-gl-driver
+    autoprune-unless: active-gl-driver
+
 finish-args:
   - --share=ipc
   - --socket=wayland
   - --socket=fallback-x11
   - --share=network              # GOG metadata, Proton-GE downloads
   - --device=dri                 # GPU access
+  - --allow=multiarch            # required: Flatpak's default seccomp kills 32-bit exes with SIGSYS
   - --filesystem=host            # game files anywhere on host, Steam/Proton, prefixes, external drives
   - --filesystem=host-os         # reach system tools at /run/host/usr/bin (wine, innoextract)
   - --filesystem=xdg-data/applications:create  # write desktop shortcuts
   - --env=PATH=/app/bin:/usr/bin:/run/host/usr/bin:/run/host/usr/local/bin
+
+cleanup-commands:
+  # Create mount points for the i386 compat and GL32 extensions so Flatpak
+  # can mount the 32-bit libraries there at runtime.
+  - mkdir -p /app/lib/i386-linux-gnu
+  - mkdir -p /app/lib/i386-linux-gnu/GL
+  - mkdir -p /app/lib/debug/lib/i386-linux-gnu
 
 modules:
   # libmspack + cabextract — required by winetricks to unpack .cab files
