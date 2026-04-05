@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -523,21 +524,37 @@ class AppSettingsDialog(Adw.Dialog):
         ).start()
 
     def _winetricks_thread(self, p_root: Path, verbs: list[str]) -> None:
+        log_path = self._config.logs_dir / f"{self._app.app_id}-winetricks.log"
         try:
-            proc = run_verbs(p_root, verbs, self._runtime)
-            proc.wait()
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "w") as log_file:
+                proc = run_verbs(
+                    p_root,
+                    verbs,
+                    self._runtime,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                )
+                proc.wait()
             ok = proc.returncode == 0
-        except Exception:
+        except Exception as exc:
+            try:
+                log_path.write_text(f"winetricks invocation raised: {exc!r}\n")
+            except OSError:
+                pass
             ok = False
-        GLib.idle_add(self._on_winetricks_done, ok)
+        GLib.idle_add(self._on_winetricks_done, ok, log_path)
 
-    def _on_winetricks_done(self, success: bool) -> None:
+    def _on_winetricks_done(self, success: bool, log_path: Path) -> None:
         self._apply_wt_btn.set_sensitive(True)
         self._apply_wt_btn.set_label("Apply Winetricks Now")
         # Show result via the parent window's toast if we can reach it
         root = self.get_root()
         if hasattr(root, "show_toast"):
-            msg = "Winetricks verbs applied." if success else "Winetricks failed — check logs."
+            if success:
+                msg = "Winetricks verbs applied."
+            else:
+                msg = f"Winetricks failed — see {log_path}"
             root.show_toast(msg)
 
     def _snapshot(self) -> dict:
