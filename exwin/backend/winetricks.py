@@ -44,9 +44,12 @@ def run_verbs(
     if runtime and runtime.is_proton:
         wineprefix = str(prefix_root / "pfx")
         env["WINEPREFIX"] = wineprefix
-        # Point winetricks at Proton's bundled wine binaries
+        # Point winetricks at Proton's bundled wine binaries.  We use wine64
+        # (via runtime.wine_binary) for $WINE — Proton's 32-bit `wine` binary
+        # requires /lib/ld-linux.so.2 which isn't present in sandboxes like
+        # Flatpak.  Modern Wine (wow64) can install 32-bit DLLs via wine64.
         proton_bin = runtime.path / "files" / "bin"
-        env["WINE"] = str(proton_bin / "wine")
+        env["WINE"] = str(runtime.wine_binary)
         env["WINE64"] = str(proton_bin / "wine64")
         env["WINESERVER"] = str(proton_bin / "wineserver")
     else:
