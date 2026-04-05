@@ -16,6 +16,23 @@ finish-args:
   - --env=PATH=/app/bin:/usr/bin:/run/host/usr/bin:/run/host/usr/local/bin
 
 modules:
+  # libmspack + cabextract — required by winetricks to unpack .cab files
+  # (e.g. DirectX June 2010 redist for d3dx9_43).  The host's cabextract
+  # links against libmspack.so.0 which isn't available inside the sandbox.
+  - name: libmspack
+    buildsystem: autotools
+    sources:
+      - type: archive
+        url: https://www.cabextract.org.uk/libmspack/libmspack-0.11alpha.tar.gz
+        sha256: 70dd1fb2f0aecc36791b71a1e1840e62173079eadaa081192d1c323a0eeea21b
+
+  - name: cabextract
+    buildsystem: autotools
+    sources:
+      - type: archive
+        url: https://www.cabextract.org.uk/cabextract-1.11.tar.gz
+        sha256: b5546db1155e4c718ff3d4b278573604f30dd64c3c5bfd4657cd089b823a3ac6
+
   - name: python3-tomli-w
     buildsystem: simple
     build-commands:
