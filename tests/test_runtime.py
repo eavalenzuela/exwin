@@ -31,9 +31,20 @@ class TestRuntime:
         rt = Runtime(name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"))
         assert rt.proton_binary == Path("/opt/proton/proton")
 
-    def test_wine_binary_for_proton(self) -> None:
+    def test_wine_binary_for_proton_falls_back_to_wine(self) -> None:
+        # /opt/proton doesn't exist, so wine64 isn't found → falls back to wine
         rt = Runtime(name="Proton 9", type=RuntimeType.PROTON, path=Path("/opt/proton"))
         assert rt.wine_binary == Path("/opt/proton/files/bin/wine")
+
+    def test_wine_binary_for_proton_prefers_wine64(self, tmp_path: Path) -> None:
+        # When wine64 exists alongside wine, prefer wine64 — the 32-bit wine
+        # binary breaks under sandboxed runtimes that lack /lib/ld-linux.so.2.
+        bindir = tmp_path / "files" / "bin"
+        bindir.mkdir(parents=True)
+        (bindir / "wine").touch()
+        (bindir / "wine64").touch()
+        rt = Runtime(name="Proton 10", type=RuntimeType.PROTON, path=tmp_path)
+        assert rt.wine_binary == bindir / "wine64"
 
     def test_wine_binary_for_wine(self) -> None:
         rt = Runtime(name="Wine", type=RuntimeType.WINE, path=Path("/usr"))

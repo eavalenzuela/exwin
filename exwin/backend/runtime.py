@@ -43,7 +43,13 @@ class Runtime:
     @property
     def wine_binary(self) -> Path:
         if self.is_proton:
-            # Proton bundles wine at files/bin/wine
+            # Prefer wine64: Proton's 32-bit `wine` launcher requires the 32-bit
+            # dynamic loader (/lib/ld-linux.so.2) which is absent in sandboxed
+            # runtimes like Flatpak, causing exec() to fail with ENOENT.  wine64
+            # handles both win32 and win64 prefixes on modern Wine.
+            wine64 = self.path / "files" / "bin" / "wine64"
+            if wine64.exists():
+                return wine64
             return self.path / "files" / "bin" / "wine"
         return self.path / "bin" / "wine"
 
