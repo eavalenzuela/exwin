@@ -1,0 +1,30 @@
+Package: exwin
+Version: @VERSION@
+Section: games
+Priority: optional
+Architecture: all
+Maintainer: exwin maintainers <noreply@github.com>
+Depends: python3 (>= 3.11),
+ python3-gi,
+ gir1.2-gtk-4.0,
+ gir1.2-adw-1,
+ python3-tomli-w
+Recommends: innoextract,
+ winetricks,
+ unar,
+ cabextract,
+ mangohud,
+ gamemode,
+ gamescope
+Suggests: p7zip-full
+Homepage: https://github.com/anthropics/exwin
+Description: Offline Windows software/game manager for Linux
+ exwin is a GTK4/libadwaita application that manages Windows games and
+ applications on Linux using Proton or Wine. It provides first-class
+ support for offline GOG installers, archive-based installs
+ (ZIP/7z/RAR), MSI packages, and generic Wine-installer executables.
+ .
+ Features include per-app Wine prefixes, DXVK/VKD3D-Proton setup,
+ winetricks verb picker, ProtonDB tier lookup, gamescope compositor
+ integration, save-file backup/restore, and a persistent library
+ database with playtime tracking.
