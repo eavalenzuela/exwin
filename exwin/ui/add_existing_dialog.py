@@ -28,6 +28,7 @@ from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.backend.winetricks import is_available as winetricks_available  # noqa: E402
 from exwin.backend.winetricks import run_verbs  # noqa: E402
 from exwin.models import AppEntry, AppSource  # noqa: E402
+from exwin.ui.winetricks_picker import WinetricksRow  # noqa: E402
 
 _ARCH_OPTIONS = ["win64", "win32"]
 
@@ -139,9 +140,9 @@ class AddExistingDialog(Adw.Dialog):
         self._arch_row.set_selected(0)
         wine_group.add(self._arch_row)
 
-        self._winetricks_row = Adw.EntryRow(title="Winetricks Verbs")
+        self._winetricks_row = WinetricksRow(title="Winetricks Verbs", parent=self)
         self._winetricks_row.set_tooltip_text(
-            "Space-separated list, e.g.: vcrun2019 corefonts d3dx9"
+            "Pick verbs to apply (e.g. vcrun2019, corefonts, d3dx9)"
         )
         if not winetricks_available():
             self._winetricks_row.set_sensitive(False)

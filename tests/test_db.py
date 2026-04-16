@@ -13,6 +13,7 @@ from exwin.db.apps import (
     update_cover_art,
     update_description,
     update_last_launched,
+    update_protondb_cache,
 )
 from exwin.models import AppEntry, AppSource
 
@@ -134,3 +135,27 @@ class TestUpdateDescription:
         insert_app(_app())
         update_description("test-app", "A great game.")
         assert get_app("test-app").description == "A great game."
+
+
+class TestProtonDBCache:
+    def test_defaults_are_empty(self, db: Config) -> None:
+        insert_app(_app())
+        got = get_app("test-app")
+        assert got.steam_appid is None
+        assert got.protondb_tier == ""
+        assert got.protondb_fetched_at == ""
+
+    def test_update_round_trip(self, db: Config) -> None:
+        insert_app(_app())
+        update_protondb_cache("test-app", 620, "platinum", "2026-04-16T12:00:00+00:00")
+        got = get_app("test-app")
+        assert got.steam_appid == 620
+        assert got.protondb_tier == "platinum"
+        assert got.protondb_fetched_at == "2026-04-16T12:00:00+00:00"
+
+    def test_update_nullable_appid(self, db: Config) -> None:
+        insert_app(_app())
+        update_protondb_cache("test-app", None, "", "")
+        got = get_app("test-app")
+        assert got.steam_appid is None
+        assert got.protondb_tier == ""

@@ -11,15 +11,21 @@ from pathlib import Path
 
 from exwin.backend.app_config import AppConfig, save_app_config
 from exwin.backend.config import Config
+from exwin.backend.exe_filter import (
+    SKIP_DIRS as _SKIP_DIRS,
+)
+from exwin.backend.exe_filter import (
+    SKIP_EXE_NAMES as _SKIP_EXES,
+)
+from exwin.backend.exe_filter import (
+    pick_best_exe as _pick_best_exe,
+)
 from exwin.backend.gog_installer import find_innoextract
 from exwin.backend.runtime import Runtime
 from exwin.backend.winetricks import is_available as winetricks_available
 from exwin.backend.winetricks import run_verbs
 from exwin.db.apps import insert_app
 from exwin.models import AppEntry, AppSource
-
-_SKIP_DIRS = {"__redist", "unins", "uninstall", "setup", "vcredist", "dotnet", "isisetup"}
-_SKIP_EXES = {"unins000.exe", "uninst.exe", "uninstall.exe", "setup.exe"}
 
 _SKIP_TOP_DIRS = {"windows"}  # skip entire top-level dir under drive_c
 
@@ -31,26 +37,24 @@ _SKIP_PROG_SUBDIRS = {  # skip these subdirs inside Program Files / Program File
     "common files",
 }
 
-_UNLIKELY_STEMS = {  # words in a stem that suggest non-game executables
-    "server",
-    "launcher",
-    "updater",
-    "patcher",
-    "config",
-    "settings",
-    "crash",
-    "bugreport",
-    "report",
-    "helper",
-}
+# Re-export pick_best_exe for backward compatibility with existing callers/tests.
+pick_best_exe = _pick_best_exe
 
 
 def detect_installer_type(installer_path: Path) -> str:
-    """Return ``"innosetup"`` if the file is an InnoSetup installer, else ``"generic"``.
+    """Classify *installer_path* as ``"msi"``, ``"archive"``, ``"innosetup"``, or ``"generic"``.
 
-    Uses ``innoextract --data-version`` which exits 0 for InnoSetup and non-zero
-    (or raises) for everything else.
+    Order of checks: ``.msi`` suffix → archive magic bytes → ``innoextract``
+    probe → falls back to ``"generic"``.
     """
+    from exwin.backend.archive_installer import detect_archive_type
+
+    if installer_path.suffix.lower() == ".msi":
+        return "msi"
+
+    if detect_archive_type(installer_path) is not None:
+        return "archive"
+
     try:
         binary = find_innoextract()
     except RuntimeError:
@@ -87,13 +91,21 @@ def run_wine_installer(
     p_root.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
 
+    is_msi = installer_path.suffix.lower() == ".msi"
+
     if runtime and runtime.is_proton:
-        cmd = [str(runtime.proton_binary), "run", str(installer_path)]
+        if is_msi:
+            cmd = [str(runtime.proton_binary), "run", "msiexec", "/i", str(installer_path)]
+        else:
+            cmd = [str(runtime.proton_binary), "run", str(installer_path)]
         env["STEAM_COMPAT_DATA_PATH"] = str(p_root)
         env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = str(Path.home() / ".steam" / "root")
     else:
         wine_bin = str(runtime.wine_binary) if runtime else "wine"
-        cmd = [wine_bin, str(installer_path)]
+        if is_msi:
+            cmd = [wine_bin, "msiexec", "/i", str(installer_path)]
+        else:
+            cmd = [wine_bin, str(installer_path)]
         env["WINEPREFIX"] = str(p_root)
         env["WINEARCH"] = arch
 
@@ -136,27 +148,6 @@ def scan_candidate_exes(p_root: Path, runtime: Runtime | None) -> list[Path]:
         candidates.append(exe)
 
     return sorted(candidates, key=lambda p: (len(p.parts), p.name.lower()))
-
-
-def pick_best_exe(candidates: list[Path]) -> Path | None:
-    """Heuristically select the most likely main executable from a filtered list."""
-    if not candidates:
-        return None
-    if len(candidates) == 1:
-        return candidates[0]
-
-    def _score(exe: Path) -> tuple:
-        stem_lower = exe.stem.lower()
-        unlikely = any(word in stem_lower for word in _UNLIKELY_STEMS)
-        depth = len(exe.parts)
-        try:
-            size = exe.stat().st_size
-        except OSError:
-            size = 0
-        # lower is better: penalise unlikely names, prefer shallower, prefer larger
-        return (1 if unlikely else 0, depth, -size)
-
-    return min(candidates, key=_score)
 
 
 def finalize_generic_install(

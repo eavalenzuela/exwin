@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import threading
@@ -12,7 +13,7 @@ from pathlib import Path
 
 from gi.repository import GLib
 
-from exwin.backend.app_config import AppConfig
+from exwin.backend.app_config import AppConfig, GamescopeConfig
 from exwin.backend.config import Config
 from exwin.backend.gpu import detect_gpus
 from exwin.backend.runtime import Runtime
@@ -20,6 +21,36 @@ from exwin.models import AppEntry
 
 # Cached GPU list — scanned once on first launch that needs GPU selection.
 _GPUS: list | None = None
+
+
+def _build_gamescope_prefix(gs: GamescopeConfig) -> list[str]:
+    """Build the ``gamescope … --`` prefix that wraps the real launch cmd."""
+    cmd = ["gamescope"]
+    if gs.output_width:
+        cmd += ["-W", str(gs.output_width)]
+    if gs.output_height:
+        cmd += ["-H", str(gs.output_height)]
+    if gs.game_width:
+        cmd += ["-w", str(gs.game_width)]
+    if gs.game_height:
+        cmd += ["-h", str(gs.game_height)]
+    if gs.fullscreen:
+        cmd += ["-f"]
+    if gs.upscale_filter:
+        cmd += ["-F", gs.upscale_filter]
+    if gs.upscale_sharpness:
+        cmd += ["--sharpness", str(gs.upscale_sharpness)]
+    if gs.hdr:
+        cmd += ["--hdr-enabled"]
+    if gs.frame_limit:
+        cmd += ["-r", str(gs.frame_limit)]
+    if gs.mangoapp:
+        cmd += ["--mangoapp"]
+    if gs.extra_args.strip():
+        cmd += shlex.split(gs.extra_args)
+    cmd += ["--"]
+    return cmd
+
 
 # Steam expects this to point to the Steam root for overlay / VR support.
 # We set it to the canonical ~/.steam/root symlink; if absent, leave empty.
@@ -154,10 +185,16 @@ class Launcher:
 
         # Optional wrappers — prepended in reverse order of precedence
         # Only add if the binary is available; silently skip if not installed.
-        if app_config.mangohud and shutil.which("mangohud"):
+        # When gamescope --mangoapp is active, suppress the outer mangohud
+        # wrapper (it would double-render the HUD).
+        gs = app_config.gamescope
+        gs_active = gs.enabled and shutil.which("gamescope") is not None
+        if app_config.mangohud and shutil.which("mangohud") and not (gs_active and gs.mangoapp):
             cmd = ["mangohud"] + cmd
         if app_config.gamemode and shutil.which("gamemoderun"):
             cmd = ["gamemoderun"] + cmd
+        if gs_active:
+            cmd = _build_gamescope_prefix(gs) + cmd
 
         return cmd
 

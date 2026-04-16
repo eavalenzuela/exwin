@@ -15,6 +15,7 @@ from exwin.backend.gog_installer import find_innoextract
 from exwin.backend.runtime import Runtime
 from exwin.backend.winetricks import is_available as winetricks_available
 from exwin.models import AppEntry
+from exwin.ui.winetricks_picker import WinetricksRow
 
 _ARCH_OPTIONS = ["win64", "win32"]
 
@@ -26,7 +27,7 @@ def build_welcome_page(
     """Build the initial 'Choose Installer' page."""
     page = Adw.StatusPage(
         title="Install a Game",
-        description="Select a Windows installer (.exe) to continue.",
+        description="Select a Windows installer (.exe, .msi) or archive (.zip, .7z, .rar).",
         icon_name="document-open-symbolic",
     )
     btn = Gtk.Button(label="Choose Installer…")
@@ -111,8 +112,8 @@ def build_confirm_gog_page(
     arch_row.set_selected(0)
     options_group.add(arch_row)
 
-    winetricks_row = Adw.EntryRow(title="Winetricks Verbs")
-    winetricks_row.set_tooltip_text("Space-separated list, e.g.: vcredist2019 dxvk")
+    winetricks_row = WinetricksRow(title="Winetricks Verbs")
+    winetricks_row.set_tooltip_text("Pick verbs to apply (e.g. vcrun2019, dxvk)")
     if not winetricks_available():
         winetricks_row.set_sensitive(False)
         winetricks_row.set_title("Winetricks Verbs (winetricks not installed)")
@@ -229,8 +230,8 @@ def build_confirm_generic_page(
     arch_row.set_selected(0)
     options_group.add(arch_row)
 
-    winetricks_row = Adw.EntryRow(title="Winetricks Verbs (post-install)")
-    winetricks_row.set_tooltip_text("Space-separated list applied after installation")
+    winetricks_row = WinetricksRow(title="Winetricks Verbs (post-install)")
+    winetricks_row.set_tooltip_text("Applied after installation completes")
     if not winetricks_available():
         winetricks_row.set_sensitive(False)
         winetricks_row.set_title("Winetricks Verbs (winetricks not installed)")
@@ -277,6 +278,99 @@ def build_confirm_generic_page(
         base_game_row=base_game_row,
         dxvk_row=dxvk_row,
         vkd3d_row=vkd3d_row,
+    )
+
+
+def build_confirm_archive_page(
+    stack: Gtk.Stack,
+    runtimes: list[Runtime],
+    on_install_clicked,
+) -> SimpleNamespace:
+    """Build the archive (zip/7z/rar) confirmation page.
+
+    Returns a namespace with: file_row, name_row, runtime_row, arch_row,
+    winetricks_row, dxvk_row, vkd3d_row, tool_warn_banner, install_btn.
+    """
+    scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
+    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+    box = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=16,
+        margin_top=16,
+        margin_bottom=16,
+        margin_start=16,
+        margin_end=16,
+    )
+    scroll.set_child(box)
+
+    tool_warn_banner = Adw.Banner(title="", revealed=False)
+    box.append(tool_warn_banner)
+
+    info_group = Adw.PreferencesGroup(title="Archive")
+    file_row = Adw.ActionRow(title="File")
+    info_group.add(file_row)
+
+    name_row = Adw.EntryRow(title="Name")
+    name_row.set_tooltip_text("Display name — also used to derive the install directory.")
+    info_group.add(name_row)
+    box.append(info_group)
+
+    hint = Gtk.Label(
+        label="The archive will be extracted directly — no Windows installer runs.",
+        wrap=True,
+        halign=Gtk.Align.CENTER,
+    )
+    hint.add_css_class("dim-label")
+    hint.add_css_class("caption")
+    box.append(hint)
+
+    options_group = Adw.PreferencesGroup(title="Runtime Options")
+    box.append(options_group)
+
+    runtime_row = Adw.ComboRow(title="Runtime")
+    rt_names = [rt.name for rt in runtimes] if runtimes else ["None detected"]
+    runtime_row.set_model(Gtk.StringList.new(rt_names))
+    runtime_row.set_selected(0)
+    options_group.add(runtime_row)
+
+    arch_row = Adw.ComboRow(title="Windows Architecture")
+    arch_row.set_model(Gtk.StringList.new(_ARCH_OPTIONS))
+    arch_row.set_selected(0)
+    options_group.add(arch_row)
+
+    winetricks_row = WinetricksRow(title="Winetricks Verbs")
+    winetricks_row.set_tooltip_text("Pick verbs to apply (e.g. vcrun2019, corefonts)")
+    if not winetricks_available():
+        winetricks_row.set_sensitive(False)
+        winetricks_row.set_title("Winetricks Verbs (winetricks not installed)")
+    options_group.add(winetricks_row)
+
+    dxvk_row = Adw.SwitchRow(title="Install DXVK", subtitle="DirectX 9/10/11 → Vulkan")
+    options_group.add(dxvk_row)
+
+    vkd3d_row = Adw.SwitchRow(title="Install VKD3D-Proton", subtitle="DirectX 12 → Vulkan")
+    options_group.add(vkd3d_row)
+
+    install_btn = Gtk.Button(label="Extract & Install")
+    install_btn.add_css_class("suggested-action")
+    install_btn.add_css_class("pill")
+    install_btn.set_halign(Gtk.Align.CENTER)
+    install_btn.connect("clicked", on_install_clicked)
+    box.append(install_btn)
+
+    stack.add_named(scroll, "confirm_archive")
+
+    return SimpleNamespace(
+        file_row=file_row,
+        name_row=name_row,
+        runtime_row=runtime_row,
+        arch_row=arch_row,
+        winetricks_row=winetricks_row,
+        dxvk_row=dxvk_row,
+        vkd3d_row=vkd3d_row,
+        tool_warn_banner=tool_warn_banner,
+        install_btn=install_btn,
     )
 
 
@@ -406,6 +500,72 @@ def build_exe_select_page(
     return SimpleNamespace(
         exe_list=exe_list,
         confirm_btn=confirm_btn,
+    )
+
+
+def build_redist_page(stack: Gtk.Stack, on_apply, on_skip) -> SimpleNamespace:
+    """Build the redistributable-prereq picker page.
+
+    Returns a namespace with: list_box, apply_btn, skip_btn, status_label.
+    The caller populates ``list_box`` with check-row widgets after scanning.
+    """
+    box = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=12,
+        margin_top=16,
+        margin_bottom=16,
+        margin_start=16,
+        margin_end=16,
+        vexpand=True,
+    )
+
+    title = Gtk.Label(label="Install Prerequisites")
+    title.add_css_class("title-3")
+    title.set_halign(Gtk.Align.START)
+    box.append(title)
+
+    subtitle = Gtk.Label(
+        label="The game ships bundled runtimes that Steam normally auto-installs. "
+        "Select which to apply to the prefix now.",
+        wrap=True,
+        xalign=0,
+    )
+    subtitle.add_css_class("dim-label")
+    box.append(subtitle)
+
+    scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
+    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    list_box = Gtk.ListBox()
+    list_box.add_css_class("boxed-list")
+    list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+    scroll.set_child(list_box)
+    box.append(scroll)
+
+    status_label = Gtk.Label(xalign=0, wrap=True)
+    status_label.add_css_class("caption")
+    status_label.add_css_class("dim-label")
+    box.append(status_label)
+
+    btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.CENTER)
+    skip_btn = Gtk.Button(label="Skip")
+    skip_btn.add_css_class("pill")
+    skip_btn.connect("clicked", on_skip)
+    btn_box.append(skip_btn)
+
+    apply_btn = Gtk.Button(label="Apply Selected")
+    apply_btn.add_css_class("suggested-action")
+    apply_btn.add_css_class("pill")
+    apply_btn.connect("clicked", on_apply)
+    btn_box.append(apply_btn)
+    box.append(btn_box)
+
+    stack.add_named(box, "redist")
+
+    return SimpleNamespace(
+        list_box=list_box,
+        apply_btn=apply_btn,
+        skip_btn=skip_btn,
+        status_label=status_label,
     )
 
 

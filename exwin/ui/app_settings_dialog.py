@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import threading
 from collections.abc import Callable
@@ -14,13 +15,14 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from exwin.backend.app_config import AppConfig, save_app_config  # noqa: E402
+from exwin.backend.app_config import AppConfig, GamescopeConfig, save_app_config  # noqa: E402
 from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.gog_metadata import apply_custom_cover_art  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.backend.winetricks import is_available as winetricks_available  # noqa: E402
 from exwin.backend.winetricks import run_verbs  # noqa: E402
 from exwin.models import AppEntry  # noqa: E402
+from exwin.ui.winetricks_picker import WinetricksRow  # noqa: E402
 
 _ARCH_OPTIONS = ["win64", "win32"]
 
@@ -66,6 +68,7 @@ class AppSettingsDialog(Adw.Dialog):
         self._build_wine_group(prefs, app_config)
         self._build_launch_group(prefs, app_config)
         self._build_gpu_group(prefs, app_config)
+        self._build_gamescope_group(prefs, app_config)
         self._build_saves_group(prefs, app_config)
         self._build_cover_art_group(prefs, app)
         self._build_env_group(prefs, app_config)
@@ -152,11 +155,9 @@ class AppSettingsDialog(Adw.Dialog):
         self._vkd3d_row.set_active(cfg.vkd3d)
         group.add(self._vkd3d_row)
 
-        self._winetricks_row = Adw.EntryRow(title="Winetricks verbs")
+        self._winetricks_row = WinetricksRow(title="Winetricks verbs", parent=self)
         self._winetricks_row.set_text(" ".join(cfg.winetricks_verbs))
-        self._winetricks_row.set_tooltip_text(
-            "Space-separated list of winetricks verbs, e.g.: vcredist2019 dxvk"
-        )
+        self._winetricks_row.set_tooltip_text("Pick verbs to apply (e.g. vcrun2019, dxvk)")
         if not winetricks_available():
             self._winetricks_row.set_sensitive(False)
             self._winetricks_row.set_title("Winetricks verbs (winetricks not installed)")
@@ -212,6 +213,86 @@ class AppSettingsDialog(Adw.Dialog):
             self._gpu_row.set_selected(0)
 
         group.add(self._gpu_row)
+
+    def _build_gamescope_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
+        group = Adw.PreferencesGroup(
+            title="Gamescope",
+            description="Compositor wrapper for HDR, FSR/NIS upscaling, and frame cap",
+        )
+        prefs.add(group)
+
+        gs = cfg.gamescope
+        gs_available = shutil.which("gamescope") is not None
+
+        self._gs_enabled_row = Adw.SwitchRow(
+            title="Enable gamescope",
+            subtitle="Wrap the game in a nested compositor"
+            if gs_available
+            else "gamescope not installed on PATH",
+        )
+        self._gs_enabled_row.set_active(gs.enabled and gs_available)
+        self._gs_enabled_row.set_sensitive(gs_available)
+        group.add(self._gs_enabled_row)
+
+        self._gs_output_w_row = Adw.EntryRow(title="Output width (-W)")
+        self._gs_output_w_row.set_text(str(gs.output_width) if gs.output_width else "")
+        self._gs_output_w_row.set_tooltip_text("0 or blank = use native resolution")
+        group.add(self._gs_output_w_row)
+
+        self._gs_output_h_row = Adw.EntryRow(title="Output height (-H)")
+        self._gs_output_h_row.set_text(str(gs.output_height) if gs.output_height else "")
+        group.add(self._gs_output_h_row)
+
+        self._gs_game_w_row = Adw.EntryRow(title="Internal render width (-w)")
+        self._gs_game_w_row.set_text(str(gs.game_width) if gs.game_width else "")
+        self._gs_game_w_row.set_tooltip_text("0 or blank = match output resolution")
+        group.add(self._gs_game_w_row)
+
+        self._gs_game_h_row = Adw.EntryRow(title="Internal render height (-h)")
+        self._gs_game_h_row.set_text(str(gs.game_height) if gs.game_height else "")
+        group.add(self._gs_game_h_row)
+
+        self._gs_fullscreen_row = Adw.SwitchRow(title="Fullscreen (-f)")
+        self._gs_fullscreen_row.set_active(gs.fullscreen)
+        group.add(self._gs_fullscreen_row)
+
+        self._gs_filter_options = ["none", "fsr", "nis", "linear", "integer"]
+        self._gs_filter_row = Adw.ComboRow(title="Upscale filter (-F)")
+        self._gs_filter_row.set_model(Gtk.StringList.new(self._gs_filter_options))
+        current_filter = gs.upscale_filter or "none"
+        try:
+            self._gs_filter_row.set_selected(self._gs_filter_options.index(current_filter))
+        except ValueError:
+            self._gs_filter_row.set_selected(0)
+        group.add(self._gs_filter_row)
+
+        self._gs_sharpness_row = Adw.EntryRow(title="Sharpness (0-20)")
+        self._gs_sharpness_row.set_text(str(gs.upscale_sharpness) if gs.upscale_sharpness else "")
+        group.add(self._gs_sharpness_row)
+
+        self._gs_hdr_row = Adw.SwitchRow(
+            title="HDR",
+            subtitle="Requires an HDR-capable gamescope build",
+        )
+        self._gs_hdr_row.set_active(gs.hdr)
+        group.add(self._gs_hdr_row)
+
+        self._gs_frame_limit_row = Adw.EntryRow(title="FPS cap (-r)")
+        self._gs_frame_limit_row.set_text(str(gs.frame_limit) if gs.frame_limit else "")
+        self._gs_frame_limit_row.set_tooltip_text("0 or blank = no cap")
+        group.add(self._gs_frame_limit_row)
+
+        self._gs_mangoapp_row = Adw.SwitchRow(
+            title="MangoHud overlay (--mangoapp)",
+            subtitle="Render MangoHud inside gamescope (disables outer MangoHud wrapper)",
+        )
+        self._gs_mangoapp_row.set_active(gs.mangoapp)
+        group.add(self._gs_mangoapp_row)
+
+        self._gs_extra_args_row = Adw.EntryRow(title="Extra args")
+        self._gs_extra_args_row.set_text(gs.extra_args)
+        self._gs_extra_args_row.set_tooltip_text("Passed through to gamescope unchanged")
+        group.add(self._gs_extra_args_row)
 
     def _build_saves_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
         group = Adw.PreferencesGroup(
@@ -725,6 +806,32 @@ class AppSettingsDialog(Adw.Dialog):
             dll_overrides=dll_overrides,
             gpu_index=gpu_index,
             save_path=self._save_path_row.get_text().strip(),
+            gamescope=self._read_gamescope_config(),
+        )
+
+    def _read_gamescope_config(self) -> GamescopeConfig:
+        def _int(entry: Adw.EntryRow) -> int:
+            text = entry.get_text().strip()
+            try:
+                return int(text) if text else 0
+            except ValueError:
+                return 0
+
+        filter_idx = self._gs_filter_row.get_selected()
+        filter_name = self._gs_filter_options[filter_idx]
+        return GamescopeConfig(
+            enabled=self._gs_enabled_row.get_active(),
+            output_width=_int(self._gs_output_w_row),
+            output_height=_int(self._gs_output_h_row),
+            game_width=_int(self._gs_game_w_row),
+            game_height=_int(self._gs_game_h_row),
+            fullscreen=self._gs_fullscreen_row.get_active(),
+            upscale_filter="" if filter_name == "none" else filter_name,
+            upscale_sharpness=_int(self._gs_sharpness_row),
+            hdr=self._gs_hdr_row.get_active(),
+            frame_limit=_int(self._gs_frame_limit_row),
+            mangoapp=self._gs_mangoapp_row.get_active(),
+            extra_args=self._gs_extra_args_row.get_text().strip(),
         )
 
 

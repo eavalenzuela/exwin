@@ -15,6 +15,13 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
+from exwin.backend import redist_scanner  # noqa: E402
+from exwin.backend.archive_installer import (  # noqa: E402
+    archive_tool_available,
+    detect_archive_type,
+    finalize_archive_install,
+    install_archive,
+)
 from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.generic_installer import (  # noqa: E402
     detect_installer_type,
@@ -30,17 +37,20 @@ from exwin.backend.gog_installer import (  # noqa: E402
     probe,
 )
 from exwin.backend.install_worker import install_gog, install_gog_dlc  # noqa: E402
+from exwin.backend.redist_scanner import RedistFinding, apply_finding  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.db.apps import get_all_apps  # noqa: E402
 from exwin.models import AppEntry, AppSource  # noqa: E402
 from exwin.ui.install_pages import (  # noqa: E402
     _ARCH_OPTIONS,
+    build_confirm_archive_page,
     build_confirm_generic_page,
     build_confirm_gog_page,
     build_done_page,
     build_error_page,
     build_exe_select_page,
     build_installing_page,
+    build_redist_page,
     build_welcome_page,
     build_wine_running_page,
 )
@@ -64,7 +74,7 @@ class InstallDialog(Adw.Dialog):
         self._initial_installer = initial_installer
         self._installer_path: Path | None = None
         self._installer_parts: list[Path] = []
-        self._installer_type: str = "innosetup"  # "innosetup" | "generic"
+        self._installer_type: str = "innosetup"  # "innosetup" | "generic" | "msi" | "archive"
         self._wine_proc: subprocess.Popen | None = None  # running Wine installer subprocess
         self._generic_prefix_root: Path | None = None
         self._generic_runtime: Runtime | None = None
@@ -73,6 +83,13 @@ class InstallDialog(Adw.Dialog):
         self._generic_dlc_base_app: AppEntry | None = None
         self._gog_wine_mode: bool = False  # True when GOG .exe runs interactively via Wine
         self._gog_probe_info = None  # InstallerInfo from probe()
+        self._archive_install_dir: Path | None = None
+        self._archive_candidates: list[Path] = []
+        self._redist_app: AppEntry | None = None
+        self._redist_runtime: Runtime | None = None
+        self._redist_findings: list[RedistFinding] = []
+        self._redist_checks: dict[str, Gtk.CheckButton] = {}
+        self._last_install_runtime: Runtime | None = None
 
         # Load existing library entries for DLC base-game picker
         try:
@@ -148,6 +165,21 @@ class InstallDialog(Adw.Dialog):
         self._generic_dxvk_row = generic.dxvk_row
         self._generic_vkd3d_row = generic.vkd3d_row
 
+        archive = build_confirm_archive_page(
+            self._stack,
+            self._runtimes,
+            on_install_clicked=self._on_archive_install_clicked,
+        )
+        self._archive_file_row = archive.file_row
+        self._archive_name_row = archive.name_row
+        self._archive_runtime_row = archive.runtime_row
+        self._archive_arch_row = archive.arch_row
+        self._archive_winetricks_row = archive.winetricks_row
+        self._archive_dxvk_row = archive.dxvk_row
+        self._archive_vkd3d_row = archive.vkd3d_row
+        self._archive_tool_warn_banner = archive.tool_warn_banner
+        self._archive_install_btn = archive.install_btn
+
         inst = build_installing_page(self._stack)
         self._install_spinner = inst.spinner
         self._install_status_label = inst.status_label
@@ -164,6 +196,16 @@ class InstallDialog(Adw.Dialog):
         )
         self._exe_list = exe.exe_list
         self._exe_confirm_btn = exe.confirm_btn
+
+        redist = build_redist_page(
+            self._stack,
+            on_apply=self._on_redist_apply,
+            on_skip=self._on_redist_skip,
+        )
+        self._redist_list = redist.list_box
+        self._redist_apply_btn = redist.apply_btn
+        self._redist_skip_btn = redist.skip_btn
+        self._redist_status_label = redist.status_label
 
         done = build_done_page(self._stack, lambda _: self.close())
         self._done_page = done.page
@@ -194,8 +236,9 @@ class InstallDialog(Adw.Dialog):
 
     def _on_choose_clicked(self, _btn: Gtk.Button) -> None:
         f = Gtk.FileFilter()
-        f.set_name("Windows Executables (*.exe)")
-        f.add_pattern("*.exe")
+        f.set_name("Installers & Archives")
+        for pat in ("*.exe", "*.msi", "*.zip", "*.7z", "*.rar"):
+            f.add_pattern(pat)
         filters = Gio.ListStore.new(Gtk.FileFilter)
         filters.append(f)
 
@@ -229,6 +272,8 @@ class InstallDialog(Adw.Dialog):
             if installer_type == "innosetup":
                 info = probe(self._installer_path)
                 GLib.idle_add(self._on_probe_done, info)
+            elif installer_type == "archive":
+                GLib.idle_add(self._on_archive_detected)
             else:
                 GLib.idle_add(self._on_generic_detected)
         except Exception as exc:
@@ -268,6 +313,35 @@ class InstallDialog(Adw.Dialog):
         self._generic_file_row.set_subtitle(self._installer_path.name)
         self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
         self._stack.set_visible_child_name("confirm_generic")
+        self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
+
+    def _on_archive_detected(self) -> None:
+        self._installer_type = "archive"
+        assert self._installer_path is not None
+        self._install_spinner.set_spinning(False)
+        self._dialog_title.set_title(self._installer_path.stem)
+        self._set_step(2, "Configure")
+        self._archive_file_row.set_subtitle(self._installer_path.name)
+        self._archive_name_row.set_text(self._installer_path.stem)
+
+        kind = detect_archive_type(self._installer_path)
+        if kind and not archive_tool_available(kind):
+            if kind == "7z":
+                self._archive_tool_warn_banner.set_title(
+                    "7z not installed — install p7zip-full to extract this archive."
+                )
+            else:
+                self._archive_tool_warn_banner.set_title(
+                    "No RAR tool available — install 'unar' or 'unrar' to extract."
+                )
+            self._archive_tool_warn_banner.set_revealed(True)
+            self._archive_install_btn.set_sensitive(False)
+        else:
+            self._archive_tool_warn_banner.set_revealed(False)
+            self._archive_install_btn.set_sensitive(True)
+
+        self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self._stack.set_visible_child_name("confirm_archive")
         self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
 
     # ------------------------------------------------------------------
@@ -318,6 +392,7 @@ class InstallDialog(Adw.Dialog):
         assert self._installer_path is not None
 
         runtime = self._runtimes[self._runtime_row.get_selected()] if self._runtimes else None
+        self._last_install_runtime = runtime
         arch = _ARCH_OPTIONS[self._arch_row.get_selected()]
         verbs_text = self._winetricks_row.get_text().strip()
         verbs = verbs_text.split() if verbs_text else []
@@ -353,6 +428,154 @@ class InstallDialog(Adw.Dialog):
             GLib.idle_add(self._on_error, str(exc))
 
     # ------------------------------------------------------------------
+    # Handlers — archive install
+    # ------------------------------------------------------------------
+
+    def _on_archive_install_clicked(self, _btn: Gtk.Button) -> None:
+        assert self._installer_path is not None
+        app_name = self._archive_name_row.get_text().strip() or self._installer_path.stem
+        runtime = (
+            self._runtimes[self._archive_runtime_row.get_selected()] if self._runtimes else None
+        )
+        arch = _ARCH_OPTIONS[self._archive_arch_row.get_selected()]
+        verbs_text = self._archive_winetricks_row.get_text().strip()
+        verbs = verbs_text.split() if verbs_text else []
+
+        self._generic_runtime = runtime
+        self._last_install_runtime = runtime
+        self._generic_arch = arch
+
+        self._set_step(3, "Installing")
+        self._stack.set_visible_child_name("installing")
+        self._install_spinner.set_spinning(True)
+        self._install_status_label.set_label("Extracting…")
+        self._log_buffer.set_text("")
+        self._progress_bar.set_fraction(0)
+        self._progress_bar.set_visible(True)
+
+        threading.Thread(
+            target=self._archive_install_thread,
+            args=(
+                self._installer_path,
+                app_name,
+                runtime,
+                arch,
+                verbs,
+                self._archive_dxvk_row.get_active(),
+                self._archive_vkd3d_row.get_active(),
+            ),
+            daemon=True,
+        ).start()
+
+    def _archive_install_thread(
+        self,
+        installer: Path,
+        app_name: str,
+        runtime: Runtime | None,
+        arch: str,
+        verbs: list[str],
+        dxvk: bool,
+        vkd3d: bool,
+    ) -> None:
+        def _file_progress(current: int, total: int) -> None:
+            GLib.idle_add(self._update_progress, current, total)
+
+        try:
+            install_dir, candidates = install_archive(
+                installer_path=installer,
+                app_name=app_name,
+                config=self._config,
+                on_progress=lambda msg: GLib.idle_add(self._append_log, msg),
+                on_file_progress=_file_progress,
+            )
+        except Exception as exc:
+            GLib.idle_add(self._on_error, str(exc))
+            return
+
+        self._archive_install_dir = install_dir
+        self._archive_candidates = candidates
+
+        GLib.idle_add(
+            self._on_archive_extract_done,
+            app_name,
+            install_dir,
+            candidates,
+            runtime,
+            arch,
+            verbs,
+            dxvk,
+            vkd3d,
+        )
+
+    def _on_archive_extract_done(
+        self,
+        app_name: str,
+        install_dir: Path,
+        candidates: list[Path],
+        runtime: Runtime | None,
+        arch: str,
+        verbs: list[str],
+        dxvk: bool,
+        vkd3d: bool,
+    ) -> None:
+        self._progress_bar.set_visible(False)
+
+        if not candidates:
+            self._on_error(
+                "No executables found inside the archive. "
+                "The archive may not contain a Windows game, or files were installed "
+                "to an unexpected layout."
+            )
+            return
+
+        # Stash finalise args for use after exe selection
+        self._archive_pending = {
+            "app_name": app_name,
+            "install_dir": install_dir,
+            "runtime": runtime,
+            "arch": arch,
+            "verbs": verbs,
+            "dxvk": dxvk,
+            "vkd3d": vkd3d,
+        }
+
+        if len(candidates) > 1:
+            self._populate_exe_select(candidates)
+            self._stack.set_visible_child_name("exe_select")
+            return
+
+        self._finalize_archive_with_exe(candidates[0])
+
+    def _finalize_archive_with_exe(self, exe_abs: Path) -> None:
+        pending = self._archive_pending
+        self._install_spinner.set_spinning(True)
+        self._install_status_label.set_label("Finalising…")
+        self._stack.set_visible_child_name("installing")
+        threading.Thread(
+            target=self._archive_finalize_thread,
+            args=(exe_abs, pending),
+            daemon=True,
+        ).start()
+
+    def _archive_finalize_thread(self, exe_abs: Path, pending: dict) -> None:
+        try:
+            app = finalize_archive_install(
+                app_name=pending["app_name"],
+                install_dir=pending["install_dir"],
+                exe_abs=exe_abs,
+                config=self._config,
+                runtime=pending["runtime"],
+                arch=pending["arch"],
+                winetricks_verbs=pending["verbs"],
+                dxvk=pending["dxvk"],
+                vkd3d=pending["vkd3d"],
+                on_progress=lambda msg: GLib.idle_add(self._append_log, msg),
+            )
+            GLib.idle_add(self._on_install_done, app)
+        except Exception as exc:
+            GLib.idle_add(self._on_error, str(exc))
+
+    # ------------------------------------------------------------------
     # Handlers — generic Wine install
     # ------------------------------------------------------------------
 
@@ -379,6 +602,7 @@ class InstallDialog(Adw.Dialog):
 
         self._generic_prefix_root = p_root
         self._generic_runtime = runtime
+        self._last_install_runtime = runtime
         self._generic_arch = arch
 
         self._set_step(3, "Installing")
@@ -497,6 +721,12 @@ class InstallDialog(Adw.Dialog):
 
         exe_abs: Path = row.exe_path  # type: ignore[attr-defined]
         assert self._installer_path is not None
+
+        # Archive flow owns its own finaliser — no Wine prefix involved yet.
+        if self._installer_type == "archive":
+            self._finalize_archive_with_exe(exe_abs)
+            return
+
         assert self._generic_prefix_root is not None
 
         if self._gog_wine_mode and self._gog_probe_info is not None:
@@ -573,10 +803,92 @@ class InstallDialog(Adw.Dialog):
     def _on_install_done(self, app: AppEntry) -> None:
         self._install_spinner.set_spinning(False)
         self._progress_bar.set_visible(False)
-        self._set_step(4, "Done")
-        self._done_page.set_description(f'"{app.name}" is ready to play.')
-        self._stack.set_visible_child_name("done")
         self._on_installed(app)
+
+        findings: list[RedistFinding] = []
+        if app.install_path and self._last_install_runtime is not None:
+            try:
+                findings = redist_scanner.scan(app.install_path)
+            except Exception:
+                findings = []
+
+        if findings:
+            self._redist_app = app
+            self._redist_runtime = self._last_install_runtime
+            self._redist_findings = findings
+            self._populate_redist_list(findings)
+            self._set_step(4, "Prerequisites")
+            self._stack.set_visible_child_name("redist")
+        else:
+            self._set_step(4, "Done")
+            self._done_page.set_description(f'"{app.name}" is ready to play.')
+            self._stack.set_visible_child_name("done")
+
+    # ------------------------------------------------------------------
+    # Redist page handlers
+    # ------------------------------------------------------------------
+
+    def _populate_redist_list(self, findings: list[RedistFinding]) -> None:
+        while (child := self._redist_list.get_first_child()) is not None:
+            self._redist_list.remove(child)
+        self._redist_checks = {}
+
+        for finding in findings:
+            row = Adw.ActionRow(title=finding.description, subtitle=finding.path.name)
+            check = Gtk.CheckButton(valign=Gtk.Align.CENTER)
+            check.set_active(finding.recommended)
+            row.add_prefix(check)
+            row.set_activatable_widget(check)
+            tag_label = Gtk.Label(
+                label=("verb: " + finding.payload) if finding.action == "verb" else "run installer",
+                valign=Gtk.Align.CENTER,
+            )
+            tag_label.add_css_class("caption")
+            tag_label.add_css_class("dim-label")
+            row.add_suffix(tag_label)
+            self._redist_list.append(row)
+            self._redist_checks[finding.kind] = check
+
+        self._redist_status_label.set_label(
+            f"Found {len(findings)} bundled prerequisite{'s' if len(findings) != 1 else ''}."
+        )
+
+    def _on_redist_apply(self, _btn: Gtk.Button) -> None:
+        selected = [f for f in self._redist_findings if self._redist_checks[f.kind].get_active()]
+        if not selected:
+            self._finish_redist_flow()
+            return
+        self._redist_apply_btn.set_sensitive(False)
+        self._redist_skip_btn.set_sensitive(False)
+        self._redist_status_label.set_label("Applying…")
+        threading.Thread(target=self._redist_apply_thread, args=(selected,), daemon=True).start()
+
+    def _on_redist_skip(self, _btn: Gtk.Button) -> None:
+        self._finish_redist_flow()
+
+    def _redist_apply_thread(self, findings: list[RedistFinding]) -> None:
+        assert self._redist_app is not None
+        assert self._redist_runtime is not None
+        prefix_root = self._redist_app.prefix_path
+        for f in findings:
+            GLib.idle_add(self._redist_status_label.set_label, f"Applying: {f.description}")
+            try:
+                apply_finding(f, prefix_root, self._redist_runtime)
+            except Exception as exc:
+                GLib.idle_add(
+                    self._redist_status_label.set_label,
+                    f"Failed: {f.description} ({exc})",
+                )
+        GLib.idle_add(self._finish_redist_flow)
+
+    def _finish_redist_flow(self) -> None:
+        self._redist_apply_btn.set_sensitive(True)
+        self._redist_skip_btn.set_sensitive(True)
+        app = self._redist_app
+        self._set_step(4, "Done")
+        if app is not None:
+            self._done_page.set_description(f'"{app.name}" is ready to play.')
+        self._stack.set_visible_child_name("done")
 
     def _on_dlc_install_done(self, dlc_title: str, base_name: str) -> None:
         self._install_spinner.set_spinning(False)

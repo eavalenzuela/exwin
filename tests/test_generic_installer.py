@@ -11,6 +11,7 @@ from exwin.backend.generic_installer import (
     _slugify_app_id,
     detect_installer_type,
     pick_best_exe,
+    run_wine_installer,
     scan_candidate_exes,
 )
 from exwin.backend.runtime import Runtime
@@ -66,6 +67,62 @@ class TestDetectInstallerType:
         exe.touch()
         with patch("exwin.backend.generic_installer.find_innoextract", side_effect=RuntimeError):
             assert detect_installer_type(exe) == "generic"
+
+    def test_msi_detected_by_suffix(self, tmp_path: Path) -> None:
+        msi = tmp_path / "installer.msi"
+        msi.touch()
+        # innoextract should never be probed for an .msi suffix
+        with patch("exwin.backend.generic_installer.find_innoextract") as mock_find:
+            assert detect_installer_type(msi) == "msi"
+            mock_find.assert_not_called()
+
+    def test_msi_detected_case_insensitive(self, tmp_path: Path) -> None:
+        msi = tmp_path / "Installer.MSI"
+        msi.touch()
+        assert detect_installer_type(msi) == "msi"
+
+    def test_archive_detected_by_magic(self, tmp_path: Path) -> None:
+        import zipfile
+
+        zpath = tmp_path / "game.zip"
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("readme.txt", "hi")
+        assert detect_installer_type(zpath) == "archive"
+
+
+# ---------------------------------------------------------------------------
+# run_wine_installer — MSI branch
+# ---------------------------------------------------------------------------
+
+
+class TestRunWineInstallerMsi:
+    def test_msi_uses_msiexec_with_wine(self, tmp_path: Path, wine_rt: Runtime) -> None:
+        msi = tmp_path / "installer.msi"
+        msi.touch()
+        prefix = tmp_path / "prefix"
+        with patch("exwin.backend.generic_installer.subprocess.Popen") as mock_popen:
+            run_wine_installer(msi, prefix, wine_rt)
+        cmd = mock_popen.call_args[0][0]
+        assert cmd[-3:] == ["msiexec", "/i", str(msi)]
+
+    def test_msi_uses_msiexec_with_proton(self, tmp_path: Path, proton_rt: Runtime) -> None:
+        msi = tmp_path / "installer.msi"
+        msi.touch()
+        prefix = tmp_path / "prefix"
+        with patch("exwin.backend.generic_installer.subprocess.Popen") as mock_popen:
+            run_wine_installer(msi, prefix, proton_rt)
+        cmd = mock_popen.call_args[0][0]
+        assert cmd[-3:] == ["msiexec", "/i", str(msi)]
+        assert cmd[1] == "run"  # proton run msiexec /i <msi>
+
+    def test_exe_does_not_use_msiexec(self, tmp_path: Path, wine_rt: Runtime) -> None:
+        exe = tmp_path / "installer.exe"
+        exe.touch()
+        prefix = tmp_path / "prefix"
+        with patch("exwin.backend.generic_installer.subprocess.Popen") as mock_popen:
+            run_wine_installer(exe, prefix, wine_rt)
+        cmd = mock_popen.call_args[0][0]
+        assert "msiexec" not in cmd
 
 
 # ---------------------------------------------------------------------------

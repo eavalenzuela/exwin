@@ -49,6 +49,9 @@ def init_db(data_dir: Path) -> None:
         for migration in (
             "ALTER TABLE apps ADD COLUMN playtime_seconds INTEGER DEFAULT 0",
             "ALTER TABLE apps ADD COLUMN tags TEXT DEFAULT ''",
+            "ALTER TABLE apps ADD COLUMN steam_appid INTEGER",
+            "ALTER TABLE apps ADD COLUMN protondb_tier TEXT DEFAULT ''",
+            "ALTER TABLE apps ADD COLUMN protondb_fetched_at TEXT DEFAULT ''",
         ):
             try:
                 conn.execute(migration)

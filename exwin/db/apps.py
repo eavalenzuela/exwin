@@ -76,13 +76,27 @@ def update_paths(app_id: str, install_path: Path | None, prefix_path: Path | Non
     with get_conn() as conn:
         conn.execute(
             "UPDATE apps SET install_path = ?, prefix_path = ? WHERE id = ?",
-            (str(install_path) if install_path else "", str(prefix_path) if prefix_path else "", app_id),
+            (
+                str(install_path) if install_path else "",
+                str(prefix_path) if prefix_path else "",
+                app_id,
+            ),
         )
 
 
 def update_runtime(app_id: str, runtime_id: int | None) -> None:
     with get_conn() as conn:
         conn.execute("UPDATE apps SET runtime_id = ? WHERE id = ?", (runtime_id, app_id))
+
+
+def update_protondb_cache(app_id: str, steam_appid: int | None, tier: str, fetched_at: str) -> None:
+    """Persist a ProtonDB lookup result for later display."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE apps SET steam_appid = ?, protondb_tier = ?, protondb_fetched_at = ? "
+            "WHERE id = ?",
+            (steam_appid, tier, fetched_at, app_id),
+        )
 
 
 def update_tags(app_id: str, tags: str) -> None:

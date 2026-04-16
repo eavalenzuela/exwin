@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from exwin.backend.app_config import AppConfig, load_app_config, save_app_config
+from exwin.backend.app_config import AppConfig, GamescopeConfig, load_app_config, save_app_config
 from exwin.backend.config import Config
 
 # ---------------------------------------------------------------------------
@@ -39,6 +39,10 @@ class TestLoadDefaults:
         assert ac.dxvk is False
         assert ac.vkd3d is False
         assert ac.gpu_index is None
+        assert ac.gamescope.enabled is False
+        assert ac.gamescope.fullscreen is True
+        assert ac.gamescope.output_width == 0
+        assert ac.gamescope.upscale_filter == ""
 
 
 # ---------------------------------------------------------------------------
@@ -127,3 +131,56 @@ class TestRoundTrip:
     def test_creates_app_subdir(self, cfg: Config) -> None:
         save_app_config("myapp", cfg, AppConfig())
         assert (cfg.apps_dir / "myapp" / "app.toml").exists()
+
+
+# ---------------------------------------------------------------------------
+# Gamescope config round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestGamescopeRoundTrip:
+    def _save_load(self, cfg: Config, ac: AppConfig) -> AppConfig:
+        save_app_config("myapp", cfg, ac)
+        return load_app_config("myapp", cfg)
+
+    def test_disabled_default_not_written(self, cfg: Config) -> None:
+        save_app_config("myapp", cfg, AppConfig())
+        toml_text = (cfg.apps_dir / "myapp" / "app.toml").read_text()
+        assert "[gamescope]" not in toml_text
+
+    def test_enabled_round_trip(self, cfg: Config) -> None:
+        gs = GamescopeConfig(
+            enabled=True,
+            output_width=1920,
+            output_height=1080,
+            game_width=1280,
+            game_height=720,
+            fullscreen=False,
+            upscale_filter="fsr",
+            upscale_sharpness=5,
+            hdr=True,
+            frame_limit=60,
+            mangoapp=True,
+            extra_args="--force-grab-cursor",
+        )
+        loaded = self._save_load(cfg, AppConfig(gamescope=gs))
+        assert loaded.gamescope.enabled is True
+        assert loaded.gamescope.output_width == 1920
+        assert loaded.gamescope.output_height == 1080
+        assert loaded.gamescope.game_width == 1280
+        assert loaded.gamescope.game_height == 720
+        assert loaded.gamescope.fullscreen is False
+        assert loaded.gamescope.upscale_filter == "fsr"
+        assert loaded.gamescope.upscale_sharpness == 5
+        assert loaded.gamescope.hdr is True
+        assert loaded.gamescope.frame_limit == 60
+        assert loaded.gamescope.mangoapp is True
+        assert loaded.gamescope.extra_args == "--force-grab-cursor"
+
+    def test_non_default_disabled_is_persisted(self, cfg: Config) -> None:
+        # User tweaked fields then flipped enabled off — values must survive.
+        gs = GamescopeConfig(enabled=False, output_width=2560, upscale_filter="nis")
+        loaded = self._save_load(cfg, AppConfig(gamescope=gs))
+        assert loaded.gamescope.enabled is False
+        assert loaded.gamescope.output_width == 2560
+        assert loaded.gamescope.upscale_filter == "nis"

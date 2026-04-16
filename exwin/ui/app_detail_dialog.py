@@ -260,6 +260,24 @@ class AppDetailDialog(Adw.Dialog):
             kill_btn.connect("clicked", self._on_kill_prefix)
             tools_row.append(kill_btn)
 
+            prereq_btn = Gtk.Button(label="Check Prereqs")
+            prereq_btn.add_css_class("flat")
+            prereq_btn.set_tooltip_text(
+                "Scan the install dir for bundled redistributables (vcredist, DX, UE prereq, …)"
+            )
+            prereq_btn.set_sensitive(bool(app.install_path))
+            prereq_btn.connect("clicked", self._on_check_prereqs)
+            tools_row.append(prereq_btn)
+
+            protondb_btn = Gtk.Button(label=self._protondb_button_label(app))
+            protondb_btn.add_css_class("flat")
+            protondb_btn.set_tooltip_text(
+                "Look up ProtonDB tier and apply tweaks suggested by community reports"
+            )
+            protondb_btn.connect("clicked", self._on_check_protondb)
+            tools_row.append(protondb_btn)
+            self._protondb_btn = protondb_btn
+
         self._uninstall_btn = Gtk.Button(label="Uninstall")
         self._uninstall_btn.add_css_class("destructive-action")
         self._uninstall_btn.set_sensitive(not is_running)
@@ -477,6 +495,44 @@ class AppDetailDialog(Adw.Dialog):
                 self._show_toast("Prefix processes killed")
             except Exception as exc:
                 self._show_toast(f"Kill prefix failed: {exc}")
+
+    def _on_check_prereqs(self, _btn: Gtk.Button) -> None:
+        from exwin.ui.redist_dialog import RedistDialog
+
+        if not self._app.install_path or not self._runtime:
+            self._show_toast("No install path or runtime configured")
+            return
+        dialog = RedistDialog(
+            app=self._app,
+            runtime=self._runtime,
+            on_toast=self._show_toast,
+        )
+        dialog.present(self.get_root())
+
+    def _on_check_protondb(self, _btn: Gtk.Button) -> None:
+        from exwin.ui.protondb_dialog import ProtonDBDialog
+
+        dialog = ProtonDBDialog(
+            app=self._app,
+            app_config=self._app_config,
+            config=self._config,
+            on_toast=self._show_toast,
+            on_config_saved=self._on_protondb_config_saved,
+        )
+        dialog.present(self.get_root())
+
+    def _on_protondb_config_saved(self, updated: AppConfig) -> None:
+        self._app_config = updated
+        if self._on_settings_saved is not None:
+            self._on_settings_saved(self._app.app_id, updated)
+        if hasattr(self, "_protondb_btn"):
+            self._protondb_btn.set_label(self._protondb_button_label(self._app))
+
+    def _protondb_button_label(self, app: AppEntry) -> str:
+        tier = (app.protondb_tier or "").strip().lower()
+        if tier:
+            return f"ProtonDB: {tier.title()}"
+        return "Check ProtonDB"
 
     def _update_primary_btn(self, is_running: bool) -> None:
         """Reconfigure the primary action button for current running state."""

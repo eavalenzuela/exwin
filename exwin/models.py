@@ -33,6 +33,9 @@ class AppEntry:
     runtime_id: int | None = None
     playtime_seconds: int = 0
     tags: str = ""  # comma-separated tag list
+    steam_appid: int | None = None
+    protondb_tier: str = ""  # "platinum" | "gold" | "silver" | "bronze" | "borked" | ""
+    protondb_fetched_at: str = ""  # ISO 8601 timestamp of last ProtonDB cache update
     is_running: bool = field(default=False, compare=False)
 
     @property
@@ -55,4 +58,23 @@ class AppEntry:
             runtime_id=row["runtime_id"],
             playtime_seconds=row["playtime_seconds"] or 0,
             tags=row["tags"] or "",
+            steam_appid=_maybe_int(row, "steam_appid"),
+            protondb_tier=_maybe_str(row, "protondb_tier"),
+            protondb_fetched_at=_maybe_str(row, "protondb_fetched_at"),
         )
+
+
+def _maybe_int(row: sqlite3.Row, key: str) -> int | None:
+    try:
+        val = row[key]
+    except (IndexError, KeyError):
+        return None
+    return int(val) if val is not None else None
+
+
+def _maybe_str(row: sqlite3.Row, key: str) -> str:
+    try:
+        val = row[key]
+    except (IndexError, KeyError):
+        return ""
+    return val or ""
