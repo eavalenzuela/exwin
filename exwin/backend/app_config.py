@@ -14,6 +14,22 @@ _CONFIG_FILENAME = "app.toml"
 
 
 @dataclass
+class HookConfig:
+    """Per-app pre/post-launch hooks — curated toggles + shell escape hatch."""
+
+    # Curated toggles (reversed on exit where applicable)
+    mount_iso: str = ""  # absolute ISO path; empty = disabled
+    kill_processes: list[str] = field(default_factory=list)  # argv names for pkill -x
+    suspend_kde_compositor: bool = False  # KDE-only; silent no-op elsewhere
+    cpu_performance_governor: bool = False  # powerprofilesctl; silent no-op if missing
+
+    # Shell escape hatch (runs under /bin/sh -c as the user)
+    pre_launch_cmd: str = ""  # non-zero aborts launch
+    post_launch_cmd: str = ""  # best-effort; errors logged
+    post_launch_on_crash_only: bool = False
+
+
+@dataclass
 class GamescopeConfig:
     """Per-app gamescope compositor settings."""
 
@@ -60,11 +76,17 @@ class AppConfig:
     # GPU override: DRI_PRIME index; None = system default
     gpu_index: int | None = None
 
+    # umu-launcher override: None = follow Config.use_umu; True/False = force
+    use_umu: bool | None = None
+
     # Save file backup: absolute path to save files dir/file; empty = not configured
     save_path: str = ""
 
     # Gamescope compositor wrapper (HDR, FSR/NIS upscaling, frame cap)
     gamescope: GamescopeConfig = field(default_factory=GamescopeConfig)
+
+    # Pre/post-launch hooks (ISO mount, kill procs, KDE compositor, governor, shell)
+    hooks: HookConfig = field(default_factory=HookConfig)
 
 
 def load_app_config(app_id: str, config: Config) -> AppConfig:
@@ -80,6 +102,7 @@ def load_app_config(app_id: str, config: Config) -> AppConfig:
     launch = raw.get("launch", {})
     backup = raw.get("backup", {})
     gs = raw.get("gamescope", {})
+    hk = raw.get("hooks", {})
     return AppConfig(
         arch=wine.get("arch", "win64"),
         winetricks_verbs=wine.get("winetricks_verbs", []),
@@ -91,6 +114,7 @@ def load_app_config(app_id: str, config: Config) -> AppConfig:
         dxvk=wine.get("dxvk", False),
         vkd3d=wine.get("vkd3d", False),
         gpu_index=launch.get("gpu_index"),
+        use_umu=launch.get("use_umu"),
         save_path=backup.get("save_path", ""),
         gamescope=GamescopeConfig(
             enabled=gs.get("enabled", False),
@@ -105,6 +129,15 @@ def load_app_config(app_id: str, config: Config) -> AppConfig:
             frame_limit=gs.get("frame_limit", 0),
             mangoapp=gs.get("mangoapp", False),
             extra_args=gs.get("extra_args", ""),
+        ),
+        hooks=HookConfig(
+            mount_iso=hk.get("mount_iso", ""),
+            kill_processes=list(hk.get("kill_processes", [])),
+            suspend_kde_compositor=hk.get("suspend_kde_compositor", False),
+            cpu_performance_governor=hk.get("cpu_performance_governor", False),
+            pre_launch_cmd=hk.get("pre_launch_cmd", ""),
+            post_launch_cmd=hk.get("post_launch_cmd", ""),
+            post_launch_on_crash_only=hk.get("post_launch_on_crash_only", False),
         ),
     )
 
@@ -127,6 +160,7 @@ def save_app_config(app_id: str, config: Config, app_config: AppConfig) -> None:
             "gamemode": app_config.gamemode,
             "mangohud": app_config.mangohud,
             **({"gpu_index": app_config.gpu_index} if app_config.gpu_index is not None else {}),
+            **({"use_umu": app_config.use_umu} if app_config.use_umu is not None else {}),
         },
         "dll_overrides": app_config.dll_overrides,
     }
@@ -150,8 +184,36 @@ def save_app_config(app_id: str, config: Config, app_config: AppConfig) -> None:
             "extra_args": gs.extra_args,
         }
 
+    hk = app_config.hooks
+    if _hooks_has_non_defaults(hk):
+        data["hooks"] = {
+            "mount_iso": hk.mount_iso,
+            "kill_processes": hk.kill_processes,
+            "suspend_kde_compositor": hk.suspend_kde_compositor,
+            "cpu_performance_governor": hk.cpu_performance_governor,
+            "pre_launch_cmd": hk.pre_launch_cmd,
+            "post_launch_cmd": hk.post_launch_cmd,
+            "post_launch_on_crash_only": hk.post_launch_on_crash_only,
+        }
+
     with open(path, "wb") as f:
         tomli_w.dump(data, f)
+
+
+def _hooks_has_non_defaults(hk: HookConfig) -> bool:
+    default = HookConfig()
+    return any(
+        getattr(hk, f) != getattr(default, f)
+        for f in (
+            "mount_iso",
+            "kill_processes",
+            "suspend_kde_compositor",
+            "cpu_performance_governor",
+            "pre_launch_cmd",
+            "post_launch_cmd",
+            "post_launch_on_crash_only",
+        )
+    )
 
 
 def _gamescope_has_non_defaults(gs: GamescopeConfig) -> bool:

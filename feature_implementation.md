@@ -1,396 +1,428 @@
-# Feature Implementation Plan — Six High-Leverage Features
+# Feature Implementation Plan — Next Five
 
-This plan covers:
+Previous batch of six install/launch features (archives, MSI, winetricks picker, redist scan, gamescope, ProtonDB) shipped in commit `3ba6e89` (2026-04-18).
 
-1. ZIP / archive installers
-2. MSI installer support
-3. ProtonDB lookup + auto-apply
-4. Winetricks verb picker UI
-5. Redist auto-scan post-install
-6. Gamescope wrapper
+This plan covers the next five items from `functionality_exploration.md`:
+
+1. Crash / short-run detection (§5.2)
+2. Folder / portable-game import (§1.8, covers §1.10 single-file exe as a degenerate case)
+3. Prefix upgrade via `wineboot -u` (§4.3)
+4. Pre-launch / post-launch shell hooks (§3.11)
+5. Umu-launcher integration (§5.1)
 
 Each section lists: goal, data model impact, new modules, modified files, UX flow, dependencies, test plan, and open questions.
 
 ---
 
-## 1. ZIP / archive installers
+## 1. Crash / short-run detection
 
 ### Goal
-Accept `.zip`, `.7z`, `.rar` as first-class installer sources for games that ship as plain archives (itch.io, abandonware, many indies). No Wine-install phase; extract to `installs_dir/<app_id>/`, auto-detect the main exe, create a fresh prefix, register.
+When a launched game exits quickly with a non-zero rc, pop a dialog showing the tail of the app log and offering: "Open ProtonDB", "Re-run with Wine debug", "View full log", "Copy log". Every crash becomes an actionable event instead of a silent failure.
 
 ### Data model
-No schema change. `AppSource.MANUAL` suffices; optionally add `AppSource.ARCHIVE` for analytics. Skip unless useful.
+Config-level knobs only:
+- `Config.crash_threshold_seconds: int = 5` — runs shorter than this with non-zero rc trigger the dialog.
+- No DB/schema change.
 
-### New module: `exwin/backend/archive_installer.py`
-
-```
-detect_archive_type(path: Path) -> str | None
-    # return "zip" | "7z" | "rar" | None (by magic bytes, not extension)
-
-extract_archive(src: Path, dest: Path, on_progress: Callable[[int,int],None]|None) -> None
-    # zip   -> stdlib zipfile
-    # 7z    -> `7z x -o<dest> <src>` (p7zip)
-    # rar   -> `unar -o <dest> <src>` (already a dep)
-    # progress: count members via `7z l` / zipfile.namelist, tick per extracted file
-
-scan_install_dir_for_exes(root: Path) -> list[Path]
-    # Like scan_candidate_exes but on a regular folder tree (no drive_c).
-    # Reuse _SKIP_DIRS / _SKIP_EXES / _UNLIKELY_STEMS from generic_installer.
-```
-
-Refactor: lift filtering constants out of `generic_installer.py` into a small shared module (e.g. `backend/exe_filter.py`) so both archive and Wine paths use the same heuristics.
-
-### Modified files
-- `exwin/backend/generic_installer.py` — `detect_installer_type()` grows to return `"archive"` when `detect_archive_type()` matches. Return-type docstring updated.
-- `exwin/ui/install_dialog.py`
-  - File filter gains `*.zip *.7z *.rar` patterns.
-  - `_probe_thread` branches on `installer_type == "archive"` → new `_on_archive_detected`.
-  - New confirm page (or reuse generic confirm, hiding Wine-specific rows): name field, runtime, arch, verbs, DXVK/VKD3D.
-  - New install path: extract → `scan_install_dir_for_exes` → exe-select page (reuse existing `exe_select` page — it already lets the user pick) → `finalize_generic_install` with `install_dir` set to the extracted folder (not prefix root) and a fresh prefix created via `create_prefix()`.
-- `exwin/ui/install_pages.py` — new `build_confirm_archive_page` or extend generic.
-- `exwin/backend/install_worker.py` — add `install_archive()` that orchestrates extract → prefix-create → winetricks/DXVK/VKD3D → insert_app.
-
-### Subtlety: install_path vs prefix_path
-For archive installs these diverge (unlike generic Wine installs where the prefix IS the install root). `finalize_generic_install` currently assumes `install_path == prefix_path`. Either (a) generalise it to accept separate paths, or (b) bypass it and inline the final insert in `install_archive()`. (b) is cleaner — there's enough divergence to justify a second finaliser.
-
-### Dependencies
-- `p7zip-full` (for 7z) — add to Flatpak manifest.
-- `unar` (already present).
-- stdlib `zipfile` for zip.
-
-### UX flow
-1. User picks `game.zip` from file dialog (or drags it onto library).
-2. Welcome → probing → confirm-archive (shows member count + total size, runtime/arch/DXVK).
-3. Extracting page with progress bar (files extracted / total).
-4. Prefix create + optional winetricks / DXVK / VKD3D.
-5. Exe-select page if >1 candidate; auto-pick if 1.
-6. Done.
-
-### Test plan
-- `tests/test_archive_installer.py`:
-  - `detect_archive_type` against tiny fixtures (a 10-byte zip, 7z, rar, and a non-archive).
-  - `extract_archive` creates expected files, respects destination.
-  - Progress callback fires (mock).
-- Manual: install an itch.io zip end-to-end.
-
-### Open questions
-- Archives with a single top-level folder vs flat — flatten one level when only one top-level directory exists? Most installers do this; worth implementing.
-- Password-protected archives — punt (surface error message only).
-
----
-
-## 2. MSI installer support
-
-### Goal
-Accept `.msi` files and run them via `wine msiexec /i`.
-
-### Data model
-No change.
-
-### Modified files
-- `exwin/backend/generic_installer.py`
-  - `detect_installer_type()`: if suffix is `.msi`, return `"msi"`.
-  - New `run_msi_installer(installer_path, p_root, runtime, arch)` — identical to `run_wine_installer` but `cmd = [wine, "msiexec", "/i", str(installer_path)]` (for Proton: `proton run msiexec /i …`).
-- `exwin/ui/install_dialog.py`
-  - File filter adds `*.msi`.
-  - `_probe_thread` treats `"msi"` the same as `"generic"` for UI purposes but flips an internal flag so `_wine_installer_thread` calls `run_msi_installer` instead of `run_wine_installer`. Simplest implementation: unify via a single `run_installer(installer_path, kind, …)` that chooses cmd by kind.
-
-### UX flow
-Same as generic Wine install — confirm page, run installer interactively, exe-select. User-visible change is just: the file picker now accepts `.msi`.
-
-### Test plan
-- `tests/test_generic_installer.py::test_detect_msi` — fixture `.msi` file (empty, valid MSI header) returns `"msi"`.
-- Manual: install a small MSI (e.g. notepad++ MSI).
-
-### Open questions
-- Should we expose `/qn` (silent MSI install) as a toggle? Probably not — most users want the wizard to choose the install path.
-
----
-
-## 3. ProtonDB lookup + auto-apply
-
-### Goal
-For any library entry, look up ProtonDB rating + top report text, show it in the UI, and offer one-click application of common tweaks (launch args, env vars, verbs) found in the reports.
-
-### Data model
-Add to DB (new column via `ALTER TABLE` migration pattern already used in `schema.py`):
-- `apps.steam_appid INTEGER` — cached Steam app id used for ProtonDB lookups (may be null for GOG titles until resolved).
-- `apps.protondb_tier TEXT` — "platinum" | "gold" | "silver" | "bronze" | "borked" | null.
-- `apps.protondb_fetched_at TEXT` — ISO timestamp; refresh older than 7 days.
-
-### New module: `exwin/backend/protondb.py`
+### New module: `exwin/ui/crash_dialog.py`
 
 ```
-resolve_steam_appid(name: str) -> int | None
-    # GET https://store.steampowered.com/api/storesearch/?term=<name>&cc=us&l=en
-    # return first hit's appid
-
-fetch_summary(appid: int) -> dict
-    # GET https://www.protondb.com/api/v1/reports/summaries/<appid>.json
-    # returns {"tier": "gold", "confidence": "good", "score": 0.78, "total": 134, ...}
-
-fetch_top_reports(appid: int, limit: int = 5) -> list[dict]
-    # GET https://www.protondb.com/api/v1/reports/app/<appid>.json (or similar)
-    # returns reports w/ text body, timestamp, tier, proton version
-
-extract_tweaks(reports: list[dict]) -> ProtonTweaks
-    # regex-mine report bodies for:
-    #   - launch args like "PROTON_NO_ESYNC=1 %command%" / "-dx11 -windowed"
-    #   - winetricks verbs "winetricks vcrun2019"
-    #   - env like "WINEDLLOVERRIDES=dinput8=n"
-    # return a ProtonTweaks dataclass with launch_args, env, verbs, dll_overrides
+class CrashDialog(Adw.Dialog):
+    def __init__(self, info: CrashInfo, on_protondb, on_debug_rerun, on_open_log):
+        # AdwStatusPage header: "<app name> exited after 2.1s (code 1)"
+        # Scrollable text view: last ~40 lines of log
+        # Buttons: ProtonDB ↗ (disabled if no steam_appid), Rerun in Debug, Open Log, Copy Log, Close
 ```
 
-Cache responses in `~/.exwin/cache/protondb/<appid>.json` (honour `protondb_fetched_at`). Use `urllib` (no new deps).
-
-### New module: `exwin/backend/steam_appid.py`
-
-Name → Steam appid resolution; isolated so `protondb.py` stays focused on reports. Small alias table for stubborn cases (e.g. GOG "The Witcher 3: Wild Hunt" vs Steam "The Witcher 3: Wild Hunt – Complete Edition") could live here — punt until a real mismatch is hit.
-
-### Modified files
-- `exwin/db/schema.py` — ALTER TABLE for the three new columns.
-- `exwin/db/apps.py` — `update_protondb_cache(app_id, appid, tier, fetched_at)`.
-- `exwin/ui/app_detail_dialog.py` — add "ProtonDB" row showing tier icon + fetched-at; "Check ProtonDB" button → spawn thread → populate.
-- `exwin/ui/protondb_dialog.py` (new) — modal showing summary, top 5 reports, and an "Apply Tweaks" button that diffs the parsed tweaks against current `AppConfig` and shows checkboxes for what to apply. On confirm, writes via `save_app_config`.
-
-### UX flow
-1. User opens a game's detail dialog.
-2. Clicks "Check ProtonDB".
-3. Background fetch: resolve appid (if cached, skip) → fetch summary → fetch reports. Spinner.
-4. Dialog shows tier + report list + parsed tweaks (checkboxes, pre-checked for the most-upvoted ones).
-5. Apply → `AppConfig` updated → toast.
-
-### Dependencies
-None (urllib); optionally `beautifulsoup4` if HTML scraping becomes necessary, but the JSON API path should cover it.
-
-### Test plan
-- `tests/test_protondb.py`:
-  - `extract_tweaks` against fixture report bodies — ensure common patterns parse correctly.
-  - `fetch_summary` with monkeypatched urlopen (fixture JSON).
-  - Cache: second call within TTL does not hit network; call after TTL does.
-- Manual: check a known platinum (Portal 2, appid 620) and a known borked title.
-
-### Open questions
-- Rate limiting — ProtonDB doesn't advertise a limit; cache aggressively and throttle to 1 req/sec.
-- Offline-first principle — this is an opt-in online feature. Gate behind a "Allow online lookups" setting in `Config`? At minimum, never auto-fetch: require an explicit button click.
-- Terms of service — confirm ProtonDB's API is safe to consume from a client this way (their web app does it).
-
----
-
-## 4. Winetricks verb picker UI
-
-### Goal
-Replace the freeform "Winetricks Verbs" text entry (in `install_dialog.py`, `add_existing_dialog.py`, `app_settings_dialog.py`) with a searchable picker showing verb names, categories, and descriptions. Users stop guessing verb names.
-
-### Data model
-No change — `AppConfig.winetricks_verbs: list[str]` remains the storage format.
-
-### New module: `exwin/backend/winetricks_catalog.py`
+### New module: `exwin/backend/crash_detect.py`
 
 ```
 @dataclass
-class Verb:
-    name: str          # "vcrun2019"
-    category: str      # "dlls" | "fonts" | "settings" | "apps" | ...
-    description: str   # "MS Visual C++ 2015-2019 Redistributable"
-
-def load_catalog(force_refresh: bool = False) -> list[Verb]:
-    # Cached at ~/.exwin/cache/winetricks_verbs.json
-    # Regenerate by parsing `winetricks --list-all` (or per-category lists)
-    # Catalog ships with a bundled fallback JSON in exwin/data/winetricks_verbs.json
-    #   so the picker works even before first `winetricks --list-all` run.
+class CrashInfo:
+    app: AppEntry
+    rc: int
+    duration_seconds: float
+    log_tail: str          # last ~40 lines
+    log_path: Path
+    runtime: Runtime | None
 ```
 
-Parsing `winetricks --list-all` output: lines are `verbname         One-line description` with variable whitespace. Split on first run of ≥2 spaces.
-
-### New module: `exwin/ui/winetricks_picker.py`
-
-```
-class WinetricksPicker(Adw.Dialog):
-    def __init__(self, selected: list[str], on_confirm: Callable[[list[str]], None]):
-        # - Search entry (filters by name OR description substring, case-insensitive)
-        # - AdwPreferencesGroup per category (collapsible)
-        # - Each row: AdwActionRow with checkbox suffix, title=verb, subtitle=description
-        # - Bottom bar: selected-count label + Apply + Cancel
-```
+`build_crash_info(app, rc, duration, log_path)` reads the tail and assembles the struct.
 
 ### Modified files
-- `exwin/ui/install_dialog.py` (confirm_gog + confirm_generic pages), `exwin/ui/add_existing_dialog.py`, `exwin/ui/app_settings_dialog.py`:
-  - Replace the `Adw.EntryRow(title="Winetricks Verbs")` with an `Adw.ActionRow` showing the current selection count + "Edit…" button.
-  - Button opens `WinetricksPicker(selected=current_verbs, on_confirm=lambda v: self._current_verbs=v)`.
-  - Also expose presets ("DirectX 9 base", "Modern .NET", "FAudio + MF") as quick-apply buttons inside the picker — presets are a small hand-curated list in `winetricks_catalog.py`.
-- `exwin/ui/install_pages.py` — update the builder functions that currently yield a text row.
+- `exwin/backend/launcher.py::Launcher`:
+  - Record `_launch_started_at: float` on launch (monotonic).
+  - In `_watch`, after Popen exits, compute duration.
+  - Track `_user_stopped: bool` — set True from the existing `stop()` method, skip crash detection when set (user initiated).
+  - If `rc != 0 and duration < config.crash_threshold_seconds and not _user_stopped`, call new `on_crash: Callable[[CrashInfo], None] | None` via `GLib.idle_add`.
+- `exwin/window.py` — register `on_crash = _show_crash_dialog`; dialog opens with ProtonDB + debug-rerun wired to existing launcher.
+- Debug rerun: call `launcher.launch(app, runtime, app_config)` with `WINEDEBUG=+all,+relay,+seh` merged into env (transient — not persisted to `AppConfig`). Log to `crash-debug-<timestamp>.log` alongside the normal log.
+- `exwin/__main__.py::_cmd_launch` — headless launch prints the crash-info summary to stderr instead of opening a dialog.
 
-### Dependencies
-None; parses existing `winetricks` output.
-
-### Test plan
-- `tests/test_winetricks_catalog.py`:
-  - Parse a fixture `--list-all` output → expected `Verb` list.
-  - Cache: second call uses cached JSON.
-  - Fallback: catalog loads even when `winetricks` binary is absent (uses bundled JSON).
-- UI smoke test: open picker, toggle a verb, confirm selection round-trips.
-
-### Open questions
-- Ship a curated "popular 30" list on top? Most users want vcrun2019, corefonts, d3dx9, mf-install, dotnet48 — putting them in a "Popular" group at the top beats dropdown diving.
-
----
-
-## 5. Redist auto-scan post-install
-
-### Goal
-After a game installs, walk its install dir for known redistributable installers/DLLs. For each found, either (a) run the installer under Wine in the game's prefix, or (b) map to the equivalent `winetricks` verb and offer to apply. Drastically reduces "installed but crashes on launch" cases.
-
-### Data model
-No change.
-
-### New module: `exwin/backend/redist_scanner.py`
-
-```
-@dataclass
-class RedistFinding:
-    path: Path              # absolute path to installer or indicator file
-    kind: str               # stable id: "vcredist-2019-x64", "dxsetup", "oalinst", ...
-    description: str        # "Visual C++ 2015-2019 Redistributable (x64)"
-    action: str             # "run" | "verb"
-    payload: str            # exe args for "run", winetricks verb for "verb"
-
-_PATTERNS = [
-    # (regex/glob on filename, kind, description, action, payload)
-    (r"vc_?redist.*x64\.exe$",   "vcredist-x64",  "...", "verb", "vcrun2019"),
-    (r"vc_?redist.*x86\.exe$",   "vcredist-x86",  "...", "verb", "vcrun2019"),
-    (r"dxsetup\.exe$",           "dxsetup",       "...", "run",  "/silent"),
-    (r"oalinst\.exe$",           "openal",        "...", "run",  "/s"),
-    (r"physx.*_systemsoftware\.exe$", "physx",    "...", "run",  "/passive"),
-    (r"UE[34]PrereqSetup_x64\.exe$",  "ue-prereq","...", "run",  "/quiet"),
-    (r"dotnetfx\.exe$",          "dotnetfx",      "...", "verb", "dotnet48"),
-    # ... ~20 entries total
-]
-
-def scan(install_dir: Path) -> list[RedistFinding]:
-    # recursively match filenames against _PATTERNS; skip anything under 'uninst*' dirs
-
-def apply_finding(finding: RedistFinding, prefix_root: Path, runtime: Runtime,
-                  on_log: Callable[[str],None]|None = None) -> int:
-    # "run" → Popen(wine, finding.path, finding.payload.split()).wait()
-    # "verb" → run_verbs(prefix_root, [finding.payload], runtime).wait()
-    # returns exit code
-```
-
-### Modified files
-- `exwin/backend/install_worker.py` — at end of `install_gog()` / `install_archive()` / after `run_wine_installer()` finalisation, call `scan()`; stash findings on the installed app for the UI to present. (Or return them from the install worker and let the UI drive.)
-- `exwin/ui/install_dialog.py` — after `_on_install_done`, if findings exist, transition to a new "redist" page: list of findings with per-row checkboxes (pre-checked), "Run selected" / "Skip" buttons. "Run" iterates, streaming log to the existing log view, tracks success/fail per item.
-- `exwin/ui/install_pages.py` — new `build_redist_page(on_run, on_skip)`.
+### UX flow
+1. User launches game.
+2. Game exits rc=1 in 2.1s.
+3. `_watch` detects short run, fires `on_crash`.
+4. Dialog pops: header "Baldur's Gate 3 exited after 2.1s (code 1)", log tail, action buttons.
+5. User clicks "Rerun in Debug" → second launch with WINEDEBUG env; same dialog re-opens on failure with fatter log.
 
 ### Dependencies
 None.
 
 ### Test plan
-- `tests/test_redist_scanner.py`:
-  - Fixture directory with synthetic filenames → `scan()` returns expected findings with correct kinds.
-  - `apply_finding` for a "verb" finding calls `run_verbs` with the right args (mock).
-  - `apply_finding` for a "run" finding builds the right wine cmd (mock Popen).
-- Manual: install a UE4 game; confirm `UE4PrereqSetup_x64.exe` is detected and applied.
+- `tests/test_launcher.py`:
+  - `test_short_nonzero_run_triggers_on_crash` — fake Popen exits in 1s w/ rc=1; `on_crash` called w/ correct duration.
+  - `test_long_run_does_not_trigger` — slow Popen exit, no callback.
+  - `test_zero_rc_does_not_trigger` — even when fast.
+  - `test_user_stop_suppresses_crash` — call `launcher.stop()` mid-run; no callback.
+- `tests/test_crash_detect.py` — `build_crash_info` reads tail correctly; handles missing log file.
+- Manual: launch a deliberately broken config, verify dialog + debug-rerun path.
 
 ### Open questions
-- Some redists must run **before** first launch (vcrun2019), others are effectively optional (OpenAL). Mark each pattern with `recommended: bool` to drive default checkbox state.
-- Should this also run opportunistically on a "Check prerequisites" button in AppDetailDialog, not just post-install?  Yes — cheap to expose; games added via Add-Existing would benefit.
+- Threshold: hard-code 5s or adaptive? Hard-code + config-tunable; adaptive ("compare to this app's median successful run") is over-engineering for v1.
+- Do we crash-detect Add-Existing dry-runs? Yes — same launcher code path.
+- How big should the log tail be? 40 lines covers most Wine stderr patterns; add "Open Full Log" for the rest.
 
 ---
 
-## 6. Gamescope wrapper
+## 2. Folder / portable-game import
 
 ### Goal
-Optional per-app `gamescope` compositor — HDR, FSR/NIS upscaling, frame cap, aspect correction, steam-deck-style fullscreen. Biggest play-quality lever not currently exposed.
+Replace the awkward "Add Existing Game" flow (user hand-picks an exe) with: pick a folder, background-scan, pre-select the best candidate, wrap in a fresh prefix. Handles single-file `.exe` portable freeware (§1.10) as a degenerate case.
 
 ### Data model
-Extend `AppConfig`:
+No change. `AppSource.MANUAL` suffices.
+
+### New module: `exwin/backend/folder_import.py`
+
+```
+def scan_folder_for_exes(root: Path) -> list[Path]:
+    # Walk root; apply exe_filter.SKIP_DIRS / SKIP_EXE_NAMES.
+    # Sort: pick_best_exe's preferred result first, then by size desc.
+
+def import_folder(
+    folder: Path,
+    app_name: str,
+    runtime: Runtime,
+    app_config: AppConfig,
+    config: Config,
+    copy: bool = True,
+    on_progress: Callable[[int,int],None] | None = None,
+) -> AppEntry:
+    # If copy=True: shutil.copytree(folder, installs_dir/app_id)
+    # If copy=False: link — install_path points at the original folder
+    # Create fresh prefix, apply winetricks verbs / DXVK / VKD3D
+    # Insert app with exe_path relative to install_path
+```
+
+### Modified files
+- `exwin/backend/exe_filter.py` — add `scan_folder_for_exes` (or expose it as a re-export; the existing `pick_best_exe` stays).
+- `exwin/ui/add_existing_dialog.py`:
+  - Add top-of-dialog mode picker: "Folder (recommended)" / "Single executable" radio group.
+  - Folder mode: folder-picker row → background scan → confirm page w/ detected exes as radio list (pre-select `pick_best_exe` result), name auto-filled from folder basename, existing runtime/arch/verbs/DXVK/VKD3D/Gamescope rows.
+  - Single-exe mode: preserved for backward compat.
+  - "Leave files in place (don't copy)" checkbox in Folder mode, with a warning toast: "moving the folder will break this entry."
+- `exwin/__main__.py` — optional CLI subcommand `add-folder <path> [--name …] [--runtime …] [--link]`. Nice-to-have; defer if out of scope.
+
+### Subtleties
+- Registry-based Windows installs: if scan finds `uninst*.exe` / `setup.exe` but no normal binary, show a hint banner: "This looks like a registered install; use Single-executable mode and point at the real binary."
+- Case-insensitive filesystem quirks (NTFS-mounted drives, SMB): `scan_folder_for_exes` uses `Path.glob` with case-insensitive patterns where needed.
+- Symlink loops: use `os.walk(followlinks=False)`.
+
+### UX flow
+1. User opens Add Existing → picks "Folder".
+2. Picks `/media/games/DiabloII/`.
+3. Background scan → `Game.exe`, `Editor.exe`, `Uninstall.exe`.
+4. Confirm page: radio list, `Game.exe` pre-checked, name prefilled "DiabloII".
+5. Runtime/arch/verbs/DXVK/VKD3D/Gamescope rows (reuse existing install-dialog page builder).
+6. Confirm → copy or link → fresh prefix → register → library refresh.
+
+### Dependencies
+None.
+
+### Test plan
+- `tests/test_folder_import.py`:
+  - Fixture folder with multiple exes → `scan_folder_for_exes` returns filtered list, skips uninstall/setup/redist.
+  - `import_folder(copy=True)` end-to-end with fake runtime: prefix created, app inserted, paths correct.
+  - `import_folder(copy=False)` — install_path points at source folder; no copy.
+  - Single-exe (degenerate) case: folder w/ one exe → app registered.
+- UI smoke: open Add Existing, run folder flow in copy mode.
+
+### Open questions
+- Batch "scan every subfolder of X and offer each as a candidate": skip for v1; §1.9 queued-install territory.
+- `.lnk` resolution (§1.6): out of scope; can fold in later.
+
+---
+
+## 3. Prefix upgrade (`wineboot -u`)
+
+### Goal
+Expose "Upgrade Prefix" next to the existing "Rebuild Prefix" button. Runs `wineboot -u` inside the prefix to refresh system DLLs after a runtime switch without blowing away user data.
+
+### Data model
+No change.
+
+### Modified files
+- `exwin/backend/prefix_tools.py`:
+  - Add `upgrade_prefix(app: AppEntry, runtime: Runtime) -> subprocess.Popen`.
+  - Proton runtime: `[proton, "run", "wineboot", "-u"]` with `STEAM_COMPAT_DATA_PATH` + `STEAM_COMPAT_CLIENT_INSTALL_PATH` + `SteamAppId=0` (same env as launcher).
+  - Wine runtime: `[<prefix>/bin/wine, "wineboot", "-u"]` with `WINEPREFIX`.
+  - Returns Popen; caller watches.
+- `exwin/ui/app_detail_dialog.py`:
+  - New flat button "Upgrade Prefix" next to Rebuild Prefix.
+  - Tooltip distinguishing the two: "Rebuild: wipe + recreate (reinstalls DXVK / VKD3D / verbs). Upgrade: run `wineboot -u` on the existing prefix to refresh system DLLs — keeps user data."
+  - Runs in a worker thread, spinner while live, log streamed to the existing log viewer.
+
+### Dependencies
+None.
+
+### Test plan
+- `tests/test_prefix_tools.py`:
+  - `test_upgrade_prefix_proton` — mocked Popen; cmd == `[proton, "run", "wineboot", "-u"]`, env has `STEAM_COMPAT_DATA_PATH`.
+  - `test_upgrade_prefix_wine` — cmd starts with `<prefix>/bin/wine`, env has `WINEPREFIX`.
+  - Exit-code surfacing: non-zero propagated.
+- Manual: switch game from GE-Proton9-1 → GE-Proton9-27, invoke Upgrade, no error.
+
+### Open questions
+- Auto-prompt on runtime switch? Offer a toast "Runtime changed — upgrade prefix?" after the AppDetailDialog runtime-combo edit. Cheap and discoverable; add in same PR. ANSWER: Yes.
+- For Wine prefixes where `wine64` is preferred (see fix commit `5fa0ff3`): use the same wine64/wine resolution logic as the launcher. Factor out into a shared helper if not already one. 
+
+---
+
+## 4. Pre-launch / post-launch hooks (curated toggles + shell escape hatch)
+
+### Goal
+Per-app actions that run before/after the game, exposed as a hybrid:
+- **Curated toggles** — a small, portable checklist covering the 80% case (mount a disc image, kill conflicting apps, suspend the compositor, boost the CPU governor). Zero shell knowledge required. Reversible on exit where applicable.
+- **Shell escape hatch** — freeform pre/post shell snippets for anything not covered by a toggle.
+
+Modelled after the same two-layer pattern as the winetricks picker (curated presets on top, full catalog underneath).
+
+### Data model
+New nested `HookConfig` on `AppConfig`. `[hooks]` TOML table omitted when all defaults.
 
 ```
 @dataclass
-class GamescopeConfig:
-    enabled: bool = False
-    output_width: int = 0       # -W; 0 = omit (gamescope chooses)
-    output_height: int = 0      # -H
-    game_width: int = 0         # -w; internal res
-    game_height: int = 0        # -h
-    fullscreen: bool = True     # -f
-    upscale_filter: str = ""    # "" | "fsr" | "nis" | "linear" | "integer"; -F
-    upscale_sharpness: int = 0  # --sharpness / --fsr-sharpness
-    hdr: bool = False           # --hdr-enabled (needs compat gamescope build)
-    frame_limit: int = 0        # -r (or --fps-limit on newer builds)
-    mangoapp: bool = False      # --mangoapp for overlay inside nested compositor
-    extra_args: str = ""        # raw escape hatch
+class HookConfig:
+    # Curated toggles (reversed on exit where applicable)
+    mount_iso: str = ""                       # path; empty = disabled
+    kill_processes: list[str] = field(default_factory=list)  # pkill -x names, pre-launch
+    suspend_kde_compositor: bool = False      # KDE only; no-op elsewhere
+    cpu_performance_governor: bool = False    # gracefully disabled if no user-level path
+
+    # Escape hatch
+    pre_launch_cmd: str = ""                  # non-zero aborts launch
+    post_launch_cmd: str = ""                 # best-effort; errors logged
+    post_launch_on_crash_only: bool = False
 
 @dataclass
 class AppConfig:
     # ... existing fields
-    gamescope: GamescopeConfig = field(default_factory=GamescopeConfig)
+    hooks: HookConfig = field(default_factory=HookConfig)
 ```
 
-TOML round-trip: new `[gamescope]` table; absent table → defaults.
+### New module: `exwin/backend/hooks.py`
+
+```
+@dataclass
+class HookState:
+    # What was actually applied — used to reverse on exit.
+    iso_loop_device: str | None = None
+    iso_mount_point: Path | None = None
+    compositor_was_active: bool = False
+    prior_power_profile: str | None = None
+    killed_processes: list[str] = field(default_factory=list)  # informational
+
+def apply_pre_hooks(hooks: HookConfig, env: dict, log: Callable[[str],None]) -> HookState
+    # Toggle order: mount ISO → kill processes → suspend compositor → perf governor → pre_launch_cmd.
+    # Each toggle is best-effort (log + continue on failure).
+    # pre_launch_cmd failure aborts launch (raises HookAbort; caller fires on_crash).
+
+def apply_post_hooks(hooks: HookConfig, state: HookState, rc: int,
+                     env: dict, log: Callable[[str],None]) -> None
+    # Order: post_launch_cmd (gated) → restore governor → resume compositor → unmount ISO.
+    # Killed processes are NOT restarted (autostart apps self-recover; the rest was intentional).
+
+# Helpers (private):
+def _mount_iso(path: Path, log) -> tuple[str, Path]      # udisksctl loop-setup + mount; fuseiso fallback
+def _unmount_iso(state, log)
+def _kill_processes(names: list[str], log) -> list[str]  # pkill -x each; name validated against [A-Za-z0-9._-]+
+def _suspend_kde_compositor(log) -> bool                 # qdbus org.kde.KWin /Compositor suspend; detects KDE via $XDG_CURRENT_DESKTOP
+def _resume_kde_compositor(was_active: bool, log)
+def _set_performance_governor(log) -> str | None         # powerprofilesctl set performance; returns prior profile
+def _restore_governor(prior: str | None, log)
+def _running_in_kde() -> bool
+def _governor_tool_available() -> str | None             # "powerprofilesctl" | "cpupower" | None
+```
+
+Implementation notes:
+- **ISO mount**: prefer `udisksctl loop-setup --file <iso>` → DBus returns the loop device path; `udisksctl mount -b <loop>` → returns mount point. Fully user-level, no root. Fallback: `fuseiso` when udisks2 unavailable. Surface the mount point via env var `EXWIN_ISO_MOUNT` so the escape-hatch shell and launch_args can reference it.
+- **KDE compositor**: detect via `os.environ.get("XDG_CURRENT_DESKTOP","").upper() == "KDE"`. Skip silently elsewhere (Mutter on GNOME always composites — no user-level toggle).
+- **CPU governor**: prefer `powerprofilesctl` (GNOME/systemd power-profiles-daemon, user-level). Fall back to `pkexec cpupower frequency-set -g performance` only if `pkexec` is available AND a sudoers rule permits it without password (detect via a dry `pkexec --version` probe); otherwise the switch stays available in config but runtime logs "skipped, no user-level path" rather than prompting. No password prompts mid-launch.
+- **Kill processes**: `pkill -x <name>` per entry, argv-style (no shell). Validate names against `[A-Za-z0-9._-]+` before invoking; reject (and log) anything else.
+- **Best-effort throughout**: toggle failure logs and continues. Only the escape-hatch `pre_launch_cmd` aborts on non-zero rc.
 
 ### Modified files
-- `exwin/backend/app_config.py` — add field + TOML read/write.
-- `exwin/backend/launcher.py::_build_command`:
-  - After building the Wine/Proton command, if `app_config.gamescope.enabled` and `shutil.which("gamescope")`, build the gamescope prefix and prepend:
-    ```
-    gs = ["gamescope"]
-    gs += ["-W", str(w)] if w else []
-    gs += ["-H", str(h)] if h else []
-    gs += ["-w", str(gw)] if gw else []
-    gs += ["-h", str(gh)] if gh else []
-    gs += ["-f"] if fullscreen else []
-    gs += ["-F", upscale_filter] if upscale_filter else []
-    gs += ["--hdr-enabled"] if hdr else []
-    gs += ["-r", str(frame_limit)] if frame_limit else []
-    gs += ["--mangoapp"] if mangoapp else []
-    gs += shlex.split(extra_args)
-    gs += ["--"]
-    cmd = gs + cmd
-    ```
-  - Order: `gamescope -- gamemoderun mangohud proton run <exe>`. `gamescope` wraps everything because it provides the display surface. If `mangoapp` is set, swap in the mangohud behaviour it replaces.
-  - If `gamescope` binary is missing, silently skip (matching how gamemoderun/mangohud are handled) and log a warning to the app log.
+- `exwin/backend/app_config.py` — add `HookConfig` + `hooks` field + `[hooks]` TOML round-trip.
+- `exwin/backend/launcher.py`:
+  - In `launch()`: build env, call `hooks.apply_pre_hooks(app_config.hooks, env, log)`, stash the returned `HookState` on the Launcher instance.
+  - On `HookAbort` from `pre_launch_cmd`: synthesise a `CrashInfo` (abort reason + shell output) and fire `on_crash` (ties into §1). No game Popen.
+  - In `_watch` after Popen exits: call `hooks.apply_post_hooks(..., state, rc, ...)`.
+  - Export `EXWIN_ISO_MOUNT` into the game env when an ISO was successfully mounted.
+- `exwin/ui/app_settings_dialog.py` — new "Hooks" group under Launch:
+  - **Curated rows (top):**
+    - EntryRow "Mount disc image": path + browse button (filter `*.iso *.cue *.bin *.img`); empty disables.
+    - EntryRow "Kill these processes before launch": comma-separated names; placeholder `discord,steam,obs`.
+    - SwitchRow "Suspend KDE compositor" — hidden when not in KDE.
+    - SwitchRow "CPU performance governor" — disabled with tooltip "No user-level governor tool found" when `_governor_tool_available()` returns None.
+  - **Collapsible "Advanced — custom shell" expander:**
+    - `Gtk.TextView`: pre-launch shell (placeholder: `# runs after toggles. $EXWIN_ISO_MOUNT is set if an ISO was mounted.`)
+    - `Gtk.TextView`: post-launch shell
+    - SwitchRow "Run post-launch only on crash"
+    - Warning label: "Runs under /bin/sh as your user. No sandbox — treat like launch_args."
 
-- `exwin/ui/app_settings_dialog.py` — new "Gamescope" group under Launch, built conditionally on `shutil.which("gamescope")` (show a disabled-with-note row when absent):
-  - SwitchRow: Enable
-  - EntryRows: Output WxH, Game WxH (blank = auto)
-  - SwitchRow: Fullscreen
-  - ComboRow: Upscale filter (none/fsr/nis/linear/integer)
-  - SpinRow: Sharpness (0–20)
-  - SwitchRow: HDR (disabled + tooltip if non-HDR build)
-  - SpinRow: FPS cap (0 = no cap)
-  - SwitchRow: MangoApp overlay
-  - EntryRow: Extra args
+### Order of operations
+
+Pre-launch (sequential; toggle failures log and continue):
+1. Mount ISO (exports `$EXWIN_ISO_MOUNT`)
+2. Kill processes
+3. Suspend compositor
+4. Performance governor
+5. `pre_launch_cmd` (failure aborts + fires `on_crash`)
+6. Build + run game cmd
+
+Post-launch (sequential, best-effort):
+1. `post_launch_cmd` (gated by `post_launch_on_crash_only`; still runs while ISO mounted + compositor suspended so it can reference them)
+2. Restore governor
+3. Resume compositor
+4. Unmount ISO
+5. (Killed processes are not restarted — by design.)
+
+### UX flow
+1. User opens a game's Advanced settings → Hooks group.
+2. Fills "Mount disc image": `/mnt/games/RA3.iso`; adds `discord,steam` to kill list; toggles "Suspend KDE compositor".
+3. Saves.
+4. On next launch: ISO mounted → processes killed → compositor suspended → game runs → on exit everything reverses.
+5. A user with an unusual need (start a VPN, switch audio sink, etc.) drops into "Advanced — custom shell" without the toggle authors needing to care.
 
 ### Dependencies
-- `gamescope` binary. Add to Flatpak manifest (`org.freedesktop.Platform.Gamescope` extension where available) or flag it as a user-installed host dep.
+- `udisks2` / `udisksctl` — for ISO toggle. Usually preinstalled on GNOME and KDE.
+- `fuseiso` — optional fallback for ISO mount when udisks2 absent.
+- `pkill` (procps) — ubiquitous.
+- `qdbus` — required only for the KDE compositor toggle.
+- `powerprofilesctl` — optional; gracefully degrades.
 
 ### Test plan
-- `tests/test_launcher.py`:
-  - `test_gamescope_wraps_cmd`: `AppConfig(gamescope=GamescopeConfig(enabled=True, output_width=1920, upscale_filter="fsr"))` + `shutil.which` patched → first element of cmd is `"gamescope"`, contains `-W 1920 -F fsr --`, real cmd follows the `--`.
-  - `test_gamescope_missing_binary`: `shutil.which("gamescope")` returns None → cmd unchanged, warning logged.
-- `tests/test_app_config.py`: round-trip a `GamescopeConfig` through TOML.
-- Manual: enable gamescope FSR on a windowed game; verify scaling.
+- `tests/test_hooks.py` (new):
+  - `test_mount_iso_records_state` — mocked udisksctl returns loop device + mount point; `HookState.iso_*` populated; env has `EXWIN_ISO_MOUNT`.
+  - `test_unmount_iso_reverses` — post-hook invokes the inverse udisksctl calls.
+  - `test_kill_processes_validates_names` — names with shell metacharacters are rejected + logged.
+  - `test_suspend_kde_compositor_gated_by_desktop` — non-KDE env → no-op, `compositor_was_active=False`.
+  - `test_suspend_kde_compositor_records_prior_state` — KDE env → returns was_active True, resume called in post.
+  - `test_governor_prefers_powerprofilesctl` — both tools present → powerprofilesctl chosen.
+  - `test_governor_gracefully_disabled_when_no_tool` — neither available → logs "skipped"; state.prior_power_profile None; no password prompt.
+  - `test_toggle_failure_logs_and_continues` — udisksctl returns non-zero → log entry, later toggles still run.
+  - `test_pre_launch_cmd_failure_raises_hook_abort` — `pre_launch_cmd=exit 1` → `HookAbort`; launcher turns this into `on_crash`, no game Popen.
+  - `test_post_launch_on_crash_only` — flag True + rc=0 → post shell skipped; rc=1 → run.
+- `tests/test_app_config.py` — `HookConfig` round-trip through TOML (empty table omitted; non-defaults written).
+- `tests/test_launcher.py` — `test_hooks_sequenced`: pre-hook sentinel exists before game Popen; post-hook runs after exit; `HookState` reversed.
+- Manual: mount a real ISO, launch an older game that needs the disc; verify umount after exit.
+
+### Security / sandbox notes
+- Curated toggles use argv (no shell) for everything except the escape hatch. Validate ISO path (readable file) and process names (`[A-Za-z0-9._-]+`) before invoking subprocess.
+- Escape-hatch shell: same trust model as `launch_args` and `env`. Document clearly.
+- Flatpak: toggles need DBus access to `org.freedesktop.UDisks2` (ISO mount), `org.freedesktop.UPower.PowerProfiles` (governor), `org.kde.KWin` (compositor). Manifest additions tracked as an integration follow-up; document any toggles that no-op inside the sandbox in v1.
 
 ### Open questions
-- HDR needs a gamescope build that supports it — detect by running `gamescope --help | grep hdr` at scan time; cache result; disable the HDR switch if unsupported.
-- Interaction with MangoHud env-var config: when `mangoapp` is active, the existing `mangohud` cmd wrapper should be suppressed automatically.
+- Killed processes auto-restart on exit? No — Discord/Steam re-launch themselves from autostart; the rest was probably what the user wanted gone.
+- Exit-early-on-toggle-failure switch? No — best-effort is the less-surprising default.
+- Scope of curated list: ship the four above; hold for explicit user requests before adding more (audio sink switch, MangoHud config picker, VPN start). Each new toggle is a DE/distro testing burden.
+- Ordering of ISO unmount vs post-launch shell: post-shell runs first so it can still read from the mount. Users who need the opposite can use the toggle alone + a pre-launch shell that also unmounts (idempotent).
+- Flatpak manifest DBus/Talk perms: punt to a packaging integration task; note which toggles degrade to no-ops inside the sandbox until then.
+
+---
+
+## 5. Umu-launcher integration
+
+### Goal
+Replace the hand-rolled `STEAM_COMPAT_DATA_PATH` / `STEAM_COMPAT_CLIENT_INSTALL_PATH` / `SteamAppId=0` Proton invocation with `umu-run`, gaining:
+- Canonical Proton entry point (tracks upstream fixes).
+- ProtonFixes per-game lookup keyed by Steam AppID (we already store `steam_appid` from the ProtonDB feature).
+- Fewer fragile env-var workarounds (e.g. the `SteamAppId=0` hack in commit `cbd9c11`).
+
+### Data model
+- `Config.use_umu: bool = True` — default enabled; silently no-ops when umu binary absent.
+- `AppConfig.use_umu: bool | None = None` — per-app override (None = follow global).
+- Reuses `apps.steam_appid` column (already added for ProtonDB).
+
+### New module: `exwin/backend/umu.py`
+
+```
+def is_available() -> bool:
+    return shutil.which("umu-run") is not None
+
+def resolve_gameid(app: AppEntry) -> str:
+    # steam_appid → str; None → "0" (ProtonFixes' default/generic path)
+```
+
+### Modified files
+- `exwin/backend/config.py` — add `use_umu` field + TOML round-trip.
+- `exwin/backend/app_config.py` — add optional `use_umu: bool | None` override.
+- `exwin/backend/launcher.py::_build_command` + `_build_env`:
+  - Branch: `umu_active = runtime.type == "proton" and config.use_umu and umu.is_available()` (plus per-app override).
+  - When active:
+    - cmd = `["umu-run", str(exe), *launch_args]`
+    - env adds `GAMEID=<resolve_gameid(app)>`, `PROTONPATH=<runtime.path>`, `WINEPREFIX=<prefix>/pfx`
+    - Drop `STEAM_COMPAT_DATA_PATH`, `STEAM_COMPAT_CLIENT_INSTALL_PATH`, `SteamAppId` (umu sets them).
+  - Wine runtimes: untouched (umu is Proton-only).
+  - Gamescope wrapping unaffected: `gamescope ... -- umu-run <exe>`.
+- `exwin/ui/settings_page.py` — "Use umu-launcher when available" switch; status badge ("Found at /usr/bin/umu-run" / "Not installed — falling back to direct Proton").
+- `exwin/ui/app_settings_dialog.py` — per-app tri-state combo (Default / On / Off).
+- Flatpak manifest (`io.github.exwin.yml`): add `umu-launcher` module (Python script + a few supporting files). If bundling proves fiddly, start as a host dep and document.
+
+### Subtleties
+- `SteamAppId=0` workaround becomes redundant when umu active (ProtonFixes now drives fix selection). Preserve it on the non-umu path to avoid regressing the fix from `cbd9c11`.
+- For GOG titles without a resolved Steam appid, `GAMEID=0` → ProtonFixes generic path. Encourage users to run a ProtonDB lookup first (already wired in AppDetailDialog) to populate `steam_appid`.
+- umu version probing (`umu-run --version`): track a minimum if a real bug surfaces; otherwise skip.
+
+### UX flow
+Invisible by default. Settings page has a single row showing current state. When a user opens a game's Advanced settings, a read-only row reads "Using umu (GAMEID=374320)" or similar.
+
+### Dependencies
+- `umu-launcher` (>=1.1 preferred). PyPI name `umu-launcher`; some distros package it.
+- Flatpak: bundle if feasible; otherwise document as a host dep.
+
+### Test plan
+- `tests/test_umu.py`:
+  - `is_available` honours PATH.
+  - `resolve_gameid` handles None + valid appid.
+- `tests/test_launcher.py`:
+  - `test_umu_cmd_proton` — umu mocked available, Proton runtime → cmd[0] == "umu-run", env has `GAMEID`, `PROTONPATH`, no `STEAM_COMPAT_*`.
+  - `test_umu_disabled_falls_back` — `config.use_umu = False` → current direct-Proton cmd unchanged.
+  - `test_umu_missing_binary_falls_back` — is_available False → direct path.
+  - `test_umu_wine_runtime_unchanged` — umu not applied for Wine.
+  - `test_umu_per_app_override_off` — `AppConfig.use_umu = False` beats config.
+  - `test_umu_gamescope_wraps_umu` — gamescope prefix present, `--` then `umu-run …`.
+- Manual: launch a known ProtonFixes title (e.g. Dark Souls III appid 374320) with umu active; verify fixes applied (UI/cutscenes behaviour).
+
+### Open questions
+- Bundle vs host dep for Flatpak — lean host-only first; bundle if install friction surfaces.
+- Migration: on first run after this lands, show a one-time toast "umu-launcher detected and enabled by default — disable in Settings if you hit issues." Keeps the change visible without being disruptive.
+- Interaction with the existing `WINE_WAYLAND_DRIVER` workflow (§3.7 in the exploration doc): umu respects standard Wine env, so no conflict.
 
 ---
 
 ## Suggested delivery order
 
-1. **MSI** (§2) — trivial, clears a class of "please pick a `.exe`" friction instantly.
-2. **ZIP/archive installers** (§1) — medium effort, unlocks itch.io library.
-3. **Winetricks picker** (§4) — self-contained UI win; prerequisite UX for §5 ("here's what we suggest" lands better when the picker can preview the verbs).
-4. **Redist auto-scan** (§5) — builds on §4 for the "offer verb" path.
-5. **Gamescope** (§6) — self-contained launch-side feature; no ordering constraint but best done once installs are reliable.
-6. **ProtonDB** (§3) — most moving parts (network, caching, report parsing, DB schema) and requires an online-lookups opt-in; do last.
+1. **Crash detection** (§1) — standalone, amplifies everything in the previous batch.
+2. **Folder import** (§2) — standalone, addresses an ongoing user pain point.
+3. **Prefix upgrade** (§3) — tiny, complements the existing Rebuild Prefix button.
+4. **Shell hooks** (§4) — self-contained; §1's `on_crash` plumbing is nice to have first (pre-hook failures reuse it).
+5. **Umu-launcher** (§5) — most architectural; do last so the earlier features don't complicate the refactor.
 
 ## Cross-cutting notes
 
-- **Flatpak manifest**: §1 (`p7zip`), §6 (`gamescope` extension). Bundle where possible; document host deps otherwise.
-- **DB migrations**: only §3 adds columns. Use the existing `ALTER TABLE … try/except OperationalError` pattern in `schema.py`.
-- **CLI parity** (`exwin/__main__.py`): once §6 lands, `--launch` must respect the gamescope block. §3-§5 are install/config features — no CLI surface needed.
-- **Offline-first principle**: only §3 is network-dependent. Gate it behind an explicit user action; never fetch automatically.
+- **No DB migrations**: §5 reuses the `steam_appid` column added for ProtonDB; the other four don't touch the schema.
+- **CLI parity** (`exwin/__main__.py`): `launch` subcommand must honour pre/post hooks (§4) and use umu (§5); `list` gains nothing. Crash-detect output prints to stderr in headless mode.
+- **Flatpak manifest**: only §5 adds a dep.
+- **Offline-first principle**: none of these five require network access. §5's ProtonFixes lookup reads from a bundled DB shipped with umu, not from the network at launch time.

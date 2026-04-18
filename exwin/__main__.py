@@ -79,6 +79,7 @@ def _headless_launch(app_id: str) -> None:
     from datetime import UTC, datetime
 
     from exwin.backend.app_config import load_app_config
+    from exwin.backend.crash_detect import read_log_tail
     from exwin.backend.launcher import Launcher
     from exwin.db.apps import get_app, update_last_launched, update_playtime
     from exwin.db.runtimes import get_runtime
@@ -103,11 +104,25 @@ def _headless_launch(app_id: str) -> None:
 
     start_time = time.monotonic()
     proc = subprocess.Popen(cmd, env=env, stdout=log_file, stderr=log_file)
-    proc.wait()
+    rc = proc.wait()
     log_file.close()
-    elapsed = int(time.monotonic() - start_time)
-    update_playtime(app_id, elapsed)
+    duration = time.monotonic() - start_time
+    update_playtime(app_id, int(duration))
     update_last_launched(app_id, datetime.now(tz=UTC).isoformat())
+
+    # Short-run crash: mirror the GUI's crash-detect threshold to stderr so
+    # .desktop shortcut users see something actionable instead of a silent fail.
+    if rc != 0 and duration < config.crash_threshold_seconds:
+        tail = read_log_tail(log_path)
+        print(
+            f"exwin: '{app.name}' exited after {duration:.1f}s with rc={rc}.",
+            file=sys.stderr,
+        )
+        print(f"exwin: log at {log_path}", file=sys.stderr)
+        if tail:
+            print("---- log tail ----", file=sys.stderr)
+            print(tail, file=sys.stderr)
+        sys.exit(rc)
 
 
 def _cmd_list() -> None:

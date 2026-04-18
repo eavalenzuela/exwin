@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from shutil import which as shutil_which
 
 import gi
 
@@ -148,6 +149,23 @@ class SettingsPage(Adw.PreferencesPage):
         ge_row.add_suffix(ge_btn)
         wine_group.add(ge_row)
 
+        # umu-launcher row
+        from exwin.backend import umu
+
+        umu_path = shutil_which("umu-run")
+        if umu_path:
+            umu_subtitle = f"Found at {umu_path}"
+        else:
+            umu_subtitle = "Not installed — falling back to direct Proton"
+        self._umu_row = Adw.SwitchRow(
+            title="Use umu-launcher when available",
+            subtitle=umu_subtitle,
+        )
+        self._umu_row.set_active(config.use_umu and umu.is_available())
+        self._umu_row.set_sensitive(umu.is_available())
+        self._umu_row.connect("notify::active", self._on_use_umu_changed)
+        wine_group.add(self._umu_row)
+
     # ------------------------------------------------------------------
     # Handlers
     # ------------------------------------------------------------------
@@ -184,6 +202,10 @@ class SettingsPage(Adw.PreferencesPage):
 
     def _on_backup_max_changed(self, row: Adw.SpinRow, _param) -> None:
         self._config.backup_max_count = int(row.get_value())
+        self._config.save()
+
+    def _on_use_umu_changed(self, row: Adw.SwitchRow, _param) -> None:
+        self._config.use_umu = bool(row.get_active())
         self._config.save()
 
     def _on_download_ge_clicked(self, _btn: Gtk.Button) -> None:

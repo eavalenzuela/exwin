@@ -32,6 +32,8 @@ class Config:
     color_scheme: str = "system"  # "system" | "light" | "dark"
     storage_root: Path | None = None  # None = use data_dir/{apps,prefixes} (default)
     backup_max_count: int = 5  # max save backups per game (0 = unlimited)
+    crash_threshold_seconds: int = 5  # short-run + non-zero rc under this → show crash dialog
+    use_umu: bool = True  # use umu-launcher for Proton runtimes when available
 
     # Window state (restored on startup)
     window_width: int = 1100
@@ -115,6 +117,8 @@ class Config:
             color_scheme=raw.get("color_scheme", "system"),
             storage_root=Path(raw_sr) if raw_sr else None,
             backup_max_count=raw.get("backup_max_count", 5),
+            crash_threshold_seconds=raw.get("crash_threshold_seconds", 5),
+            use_umu=raw.get("use_umu", True),
             window_width=win.get("width", 1100),
             window_height=win.get("height", 700),
             sidebar_visible=win.get("sidebar_visible", True),
@@ -130,6 +134,8 @@ class Config:
             "default_runtime": self.default_runtime,
             "color_scheme": self.color_scheme,
             "backup_max_count": self.backup_max_count,
+            "crash_threshold_seconds": self.crash_threshold_seconds,
+            "use_umu": self.use_umu,
         }
         if self.storage_root is not None:
             data["storage_root"] = str(self.storage_root)

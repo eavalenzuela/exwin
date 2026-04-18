@@ -155,6 +155,29 @@ class TestStorageRoot:
         assert "storage_root" not in raw
 
 
+class TestUseUmu:
+    def test_default_is_true(self, tmp_config: Config) -> None:
+        assert tmp_config.use_umu is True
+
+    def test_roundtrip_false(self, tmp_config: Config) -> None:
+        import tomllib
+
+        tmp_config.use_umu = False
+        tmp_config.save()
+        with open(tmp_config.config_path, "rb") as f:
+            raw = tomllib.load(f)
+        assert raw["use_umu"] is False
+
+    def test_load_honours_value(self, tmp_path: Path, monkeypatch) -> None:
+        data_dir = tmp_path / "exwin"
+        monkeypatch.setenv("EXWIN_DATA_DIR", str(data_dir))
+        cfg = Config(data_dir=data_dir, use_umu=False)
+        cfg._ensure_dirs()
+        cfg.save()
+        loaded = Config.load()
+        assert loaded.use_umu is False
+
+
 def _load_from(data_dir: Path) -> Config:
     """Load a Config from an explicit data_dir without touching the real home dir."""
     import tomllib

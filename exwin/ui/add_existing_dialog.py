@@ -23,6 +23,10 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 from exwin.backend.app_config import AppConfig, save_app_config  # noqa: E402
 from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.dxvk import install_dxvk, install_vkd3d  # noqa: E402
+from exwin.backend.folder_import import (  # noqa: E402
+    copy_folder_into_installs,
+    scan_folder_for_exes,
+)
 from exwin.backend.prefix import create_prefix  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.backend.winetricks import is_available as winetricks_available  # noqa: E402
@@ -31,6 +35,8 @@ from exwin.models import AppEntry, AppSource  # noqa: E402
 from exwin.ui.winetricks_picker import WinetricksRow  # noqa: E402
 
 _ARCH_OPTIONS = ["win64", "win32"]
+_MODE_FOLDER = 0
+_MODE_OPTIONS = ["Folder (recommended)", "Single executable"]
 
 
 def _slugify(name: str) -> str:
@@ -74,6 +80,7 @@ class AddExistingDialog(Adw.Dialog):
         self._build_error_page()
 
         self._stack.set_visible_child_name("form")
+        self._apply_mode()
 
     # ------------------------------------------------------------------
     # Page builders
@@ -86,6 +93,22 @@ class AddExistingDialog(Adw.Dialog):
         page = Adw.PreferencesPage()
         scroll.set_child(page)
 
+        # ── Mode group ──────────────────────────────────────────────────
+        mode_group = Adw.PreferencesGroup(
+            title="Import Mode",
+            description=(
+                "Folder mode auto-detects the main executable. "
+                "Use Single executable only for odd layouts."
+            ),
+        )
+        page.add(mode_group)
+
+        self._mode_row = Adw.ComboRow(title="How to add this game")
+        self._mode_row.set_model(Gtk.StringList.new(_MODE_OPTIONS))
+        self._mode_row.set_selected(_MODE_FOLDER)
+        self._mode_row.connect("notify::selected", self._on_mode_changed)
+        mode_group.add(self._mode_row)
+
         # ── Game info group ─────────────────────────────────────────────
         info_group = Adw.PreferencesGroup(title="Game Info")
         page.add(info_group)
@@ -97,12 +120,20 @@ class AddExistingDialog(Adw.Dialog):
         paths_group = Adw.PreferencesGroup(title="Paths")
         page.add(paths_group)
 
-        self._install_row = Adw.EntryRow(title="Install Directory")
+        self._install_row = Adw.EntryRow(title="Game Folder")
         install_browse = Gtk.Button(icon_name="folder-open-symbolic", valign=Gtk.Align.CENTER)
         install_browse.add_css_class("flat")
         install_browse.connect("clicked", self._on_browse_install)
         self._install_row.add_suffix(install_browse)
+        self._install_row.connect("changed", self._on_install_path_changed)
         paths_group.add(self._install_row)
+
+        self._copy_row = Adw.SwitchRow(
+            title="Copy files into exwin storage",
+            subtitle="Off: link to the folder in place (moving it later breaks this entry).",
+            active=True,
+        )
+        paths_group.add(self._copy_row)
 
         self._exe_row = Adw.EntryRow(title="Executable (relative to install dir)")
         exe_browse = Gtk.Button(icon_name="folder-open-symbolic", valign=Gtk.Align.CENTER)
@@ -117,6 +148,21 @@ class AddExistingDialog(Adw.Dialog):
         prefix_browse.connect("clicked", self._on_browse_prefix)
         self._prefix_row.add_suffix(prefix_browse)
         paths_group.add(self._prefix_row)
+
+        # ── Detected executables group (folder mode) ────────────────────
+        self._detected_group = Adw.PreferencesGroup(
+            title="Detected Executables",
+            description="Select the main game binary. Auto-populated when you pick a folder.",
+        )
+        page.add(self._detected_group)
+        self._detected_status_row = Adw.ActionRow(title="Pick a folder above to scan.")
+        self._detected_group.add(self._detected_status_row)
+        self._detected_rows: list[Adw.ActionRow] = []
+        self._detected_candidates: list[Path] = []
+        self._detected_selected: Path | None = None
+        # Track the latest scan so stale results from a previous folder
+        # don't clobber the current one.
+        self._scan_token = 0
 
         # ── Wine setup group ────────────────────────────────────────────
         wine_group = Adw.PreferencesGroup(
@@ -245,7 +291,12 @@ class AddExistingDialog(Adw.Dialog):
     # ------------------------------------------------------------------
 
     def _on_browse_install(self, _btn: Gtk.Button) -> None:
-        dialog = Gtk.FileDialog(title="Select Install Directory")
+        title = (
+            "Select Game Folder"
+            if self._mode_row.get_selected() == _MODE_FOLDER
+            else "Select Install Directory"
+        )
+        dialog = Gtk.FileDialog(title=title)
         dialog.select_folder(self.get_root(), None, self._on_install_selected)
 
     def _on_install_selected(self, dialog: Gtk.FileDialog, result) -> None:
@@ -255,6 +306,122 @@ class AddExistingDialog(Adw.Dialog):
                 self._install_row.set_text(folder.get_path())
         except Exception:
             pass
+
+    def _on_install_path_changed(self, _row: Adw.EntryRow) -> None:
+        """Kick off a background exe scan whenever the folder path changes (folder mode)."""
+        if self._mode_row.get_selected() != _MODE_FOLDER:
+            return
+        path_text = self._install_row.get_text().strip()
+        if not path_text:
+            self._set_scan_status("Pick a folder above to scan.")
+            return
+        folder = Path(path_text)
+        if not folder.is_dir():
+            self._set_scan_status("Folder does not exist yet.")
+            return
+        # Auto-fill name from folder basename if blank.
+        if not self._name_row.get_text().strip():
+            self._name_row.set_text(folder.name)
+        self._scan_token += 1
+        token = self._scan_token
+        self._set_scan_status(f"Scanning {folder.name}…")
+        import threading
+
+        threading.Thread(target=self._scan_thread, args=(folder, token), daemon=True).start()
+
+    def _scan_thread(self, folder: Path, token: int) -> None:
+        try:
+            candidates = scan_folder_for_exes(folder)
+        except Exception as exc:  # noqa: BLE001 — surface any filesystem issue
+            GLib.idle_add(self._on_scan_error, token, str(exc))
+            return
+        GLib.idle_add(self._on_scan_done, token, folder, candidates)
+
+    def _on_scan_done(self, token: int, folder: Path, candidates: list[Path]) -> None:
+        if token != self._scan_token:
+            return  # stale — a newer scan has started
+        self._populate_candidates(folder, candidates)
+
+    def _on_scan_error(self, token: int, message: str) -> None:
+        if token != self._scan_token:
+            return
+        self._clear_candidates()
+        self._set_scan_status(f"Scan failed: {message}")
+
+    def _populate_candidates(self, folder: Path, candidates: list[Path]) -> None:
+        self._clear_candidates()
+        if not candidates:
+            self._set_scan_status("No .exe files found.")
+            self._detected_candidates = []
+            self._detected_selected = None
+            self._exe_row.set_text("")
+            return
+        self._detected_candidates = candidates
+        self._detected_selected = candidates[0]
+
+        group_leader: Gtk.CheckButton | None = None
+        for idx, exe in enumerate(candidates):
+            row = Adw.ActionRow()
+            try:
+                rel = str(exe.relative_to(folder))
+            except ValueError:
+                rel = str(exe)
+            row.set_title(rel)
+            try:
+                size_mb = exe.stat().st_size / (1024 * 1024)
+                row.set_subtitle(f"{size_mb:.1f} MB")
+            except OSError:
+                pass
+            check = Gtk.CheckButton(valign=Gtk.Align.CENTER)
+            if group_leader is None:
+                group_leader = check
+            else:
+                check.set_group(group_leader)
+            check.set_active(idx == 0)
+            check.connect("toggled", self._on_candidate_toggled, exe)
+            row.add_prefix(check)
+            row.set_activatable_widget(check)
+            self._detected_group.add(row)
+            self._detected_rows.append(row)
+
+        # Auto-fill the (hidden-in-folder-mode) exe_row for _on_add_clicked to use.
+        self._exe_row.set_text(str(candidates[0].relative_to(folder)))
+
+    def _clear_candidates(self) -> None:
+        for row in self._detected_rows:
+            self._detected_group.remove(row)
+        self._detected_rows = []
+
+    def _set_scan_status(self, text: str) -> None:
+        self._detected_status_row.set_title(text)
+        self._detected_status_row.set_visible(not self._detected_rows)
+
+    def _on_candidate_toggled(self, check: Gtk.CheckButton, exe: Path) -> None:
+        if not check.get_active():
+            return
+        self._detected_selected = exe
+        install_text = self._install_row.get_text().strip()
+        if install_text:
+            try:
+                rel = exe.relative_to(Path(install_text))
+                self._exe_row.set_text(str(rel))
+            except ValueError:
+                self._exe_row.set_text(str(exe))
+
+    def _on_mode_changed(self, _row: Adw.ComboRow, _param) -> None:
+        self._apply_mode()
+
+    def _apply_mode(self) -> None:
+        """Show/hide rows based on current import mode."""
+        folder_mode = self._mode_row.get_selected() == _MODE_FOLDER
+        self._install_row.set_title("Game Folder" if folder_mode else "Install Directory")
+        # In folder mode the exe is picked automatically; hide the manual row.
+        self._exe_row.set_visible(not folder_mode)
+        self._copy_row.set_visible(folder_mode)
+        self._detected_group.set_visible(folder_mode)
+        if folder_mode:
+            # Re-run scan for the current folder, if any.
+            self._on_install_path_changed(self._install_row)
 
     def _on_browse_exe(self, _btn: Gtk.Button) -> None:
         install_dir = self._install_row.get_text().strip()
@@ -296,25 +463,44 @@ class AddExistingDialog(Adw.Dialog):
     def _on_add_clicked(self, _btn: Gtk.Button) -> None:
         name = self._name_row.get_text().strip()
         install_path = self._install_row.get_text().strip()
-        exe_path = self._exe_row.get_text().strip()
         prefix_path = self._prefix_row.get_text().strip()
+        folder_mode = self._mode_row.get_selected() == _MODE_FOLDER
 
         # Validation
         if not name:
             self._show_toast("Please enter a game name")
             return
         if not install_path or not Path(install_path).is_dir():
-            self._show_toast("Please select a valid install directory")
-            return
-        if not exe_path:
-            self._show_toast("Please specify an executable")
+            self._show_toast(
+                "Please select a valid folder"
+                if folder_mode
+                else "Please select a valid install directory"
+            )
             return
 
-        install_dir = Path(install_path)
-        full_exe = install_dir / exe_path
-        if not full_exe.exists():
-            self._show_toast(f"Executable not found: {full_exe}")
-            return
+        source_dir = Path(install_path)
+        copy_files = folder_mode and self._copy_row.get_active()
+
+        # Resolve exe_path based on mode.
+        if folder_mode:
+            if self._detected_selected is None:
+                self._show_toast(
+                    "No executable selected — wait for the scan or pick Single executable mode"
+                )
+                return
+            try:
+                exe_path = str(self._detected_selected.relative_to(source_dir))
+            except ValueError:
+                self._show_toast("Selected executable is outside the chosen folder")
+                return
+        else:
+            exe_path = self._exe_row.get_text().strip()
+            if not exe_path:
+                self._show_toast("Please specify an executable")
+                return
+            if not (source_dir / exe_path).exists():
+                self._show_toast(f"Executable not found: {source_dir / exe_path}")
+                return
 
         # Runtime required — we need it to init the prefix and launch the game
         if not self._runtimes:
@@ -350,7 +536,7 @@ class AddExistingDialog(Adw.Dialog):
             args=(
                 app_id,
                 name,
-                install_dir,
+                source_dir,
                 exe_path,
                 prefix_override,
                 runtime,
@@ -358,6 +544,7 @@ class AddExistingDialog(Adw.Dialog):
                 verbs,
                 install_dxvk_flag,
                 install_vkd3d_flag,
+                copy_files,
             ),
             daemon=True,
         ).start()
@@ -366,7 +553,7 @@ class AddExistingDialog(Adw.Dialog):
         self,
         app_id: str,
         name: str,
-        install_dir: Path,
+        source_dir: Path,
         exe_path: str,
         prefix_override: Path | None,
         runtime: Runtime,
@@ -374,11 +561,21 @@ class AddExistingDialog(Adw.Dialog):
         verbs: list[str],
         install_dxvk_flag: bool,
         install_vkd3d_flag: bool,
+        copy_files: bool = False,
     ) -> None:
         def _log(msg: str) -> None:
             GLib.idle_add(self._append_log, msg)
 
         try:
+            # 0. Optionally copy the source folder into exwin storage.
+            if copy_files:
+                install_dir = copy_folder_into_installs(
+                    source_dir, app_id, self._config, on_progress=_log
+                )
+                _log(f"Copied files into {install_dir}")
+            else:
+                install_dir = source_dir
+
             # 1. Create (or reuse) the Wine prefix
             if prefix_override:
                 _log(f"Using existing prefix: {prefix_override}")

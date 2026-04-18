@@ -22,6 +22,11 @@
       <li>Play time tracking</li>
       <li>Desktop shortcut creation</li>
       <li>Headless launch mode for desktop shortcuts</li>
+      <li>Crash detection with log-tail dialog for short-run failures</li>
+      <li>Folder import for already-extracted portable games</li>
+      <li>One-click prefix upgrade via wineboot -u</li>
+      <li>Pre/post-launch hooks (ISO mount, kill processes, compositor, governor, shell)</li>
+      <li>umu-launcher integration for canonical Proton launches with ProtonFixes</li>
     </ul>
   </description>
 

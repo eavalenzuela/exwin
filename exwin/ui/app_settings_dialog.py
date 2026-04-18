@@ -15,7 +15,12 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from exwin.backend.app_config import AppConfig, GamescopeConfig, save_app_config  # noqa: E402
+from exwin.backend.app_config import (  # noqa: E402
+    AppConfig,
+    GamescopeConfig,
+    HookConfig,
+    save_app_config,
+)
 from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.gog_metadata import apply_custom_cover_art  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
@@ -70,6 +75,7 @@ class AppSettingsDialog(Adw.Dialog):
         self._build_gpu_group(prefs, app_config)
         self._build_gamescope_group(prefs, app_config)
         self._build_saves_group(prefs, app_config)
+        self._build_hooks_group(prefs, app_config)
         self._build_cover_art_group(prefs, app)
         self._build_env_group(prefs, app_config)
         self._build_dll_group(prefs, app_config)
@@ -185,6 +191,21 @@ class AppSettingsDialog(Adw.Dialog):
         self._args_row.set_text(" ".join(cfg.launch_args))
         self._args_row.set_tooltip_text("Space-separated arguments passed to the executable")
         group.add(self._args_row)
+
+        # umu-launcher override (tri-state)
+        self._umu_options = ["Default (follow global)", "Force on", "Force off"]
+        self._umu_row = Adw.ComboRow(
+            title="umu-launcher",
+            subtitle="Canonical Proton entry with ProtonFixes per-app support",
+        )
+        self._umu_row.set_model(Gtk.StringList.new(self._umu_options))
+        if cfg.use_umu is None:
+            self._umu_row.set_selected(0)
+        elif cfg.use_umu:
+            self._umu_row.set_selected(1)
+        else:
+            self._umu_row.set_selected(2)
+        group.add(self._umu_row)
 
     def _build_gpu_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
         group = Adw.PreferencesGroup(title="GPU")
@@ -319,6 +340,137 @@ class AppSettingsDialog(Adw.Dialog):
 
         group.add(self._save_path_row)
 
+    def _build_hooks_group(self, prefs: Adw.PreferencesPage, cfg: AppConfig) -> None:
+        from exwin.backend.hooks import _governor_tool_available, _running_in_kde
+
+        group = Adw.PreferencesGroup(
+            title="Hooks",
+            description="Run toggles and shell commands before/after the game",
+        )
+        prefs.add(group)
+
+        hk = cfg.hooks
+
+        # Mount ISO
+        self._hk_iso_row = Adw.EntryRow(title="Mount disc image")
+        self._hk_iso_row.set_text(hk.mount_iso)
+        self._hk_iso_row.set_tooltip_text(
+            "Mounts the ISO via udisksctl before launch. The mount point is "
+            "exported as $EXWIN_ISO_MOUNT. Unmounted automatically on exit."
+        )
+        browse_iso = Gtk.Button(icon_name="document-open-symbolic")
+        browse_iso.add_css_class("flat")
+        browse_iso.set_valign(Gtk.Align.CENTER)
+        browse_iso.connect("clicked", self._on_browse_iso)
+        self._hk_iso_row.add_suffix(browse_iso)
+        group.add(self._hk_iso_row)
+
+        # Kill processes
+        self._hk_kill_row = Adw.EntryRow(title="Kill processes before launch")
+        self._hk_kill_row.set_text(", ".join(hk.kill_processes))
+        self._hk_kill_row.set_tooltip_text(
+            "Comma-separated process names (pkill -x). Example: discord, steam, obs"
+        )
+        group.add(self._hk_kill_row)
+
+        # KDE compositor
+        self._hk_compositor_row = Adw.SwitchRow(
+            title="Suspend KDE compositor",
+            subtitle="Disable compositing while the game runs (KDE only)",
+        )
+        self._hk_compositor_row.set_active(hk.suspend_kde_compositor)
+        if not _running_in_kde():
+            self._hk_compositor_row.set_sensitive(False)
+            self._hk_compositor_row.set_subtitle("Not running KDE — no-op")
+        group.add(self._hk_compositor_row)
+
+        # CPU governor
+        self._hk_governor_row = Adw.SwitchRow(
+            title="CPU performance governor",
+            subtitle="Switch to 'performance' via powerprofilesctl; restore on exit",
+        )
+        self._hk_governor_row.set_active(hk.cpu_performance_governor)
+        if _governor_tool_available() is None:
+            self._hk_governor_row.set_sensitive(False)
+            self._hk_governor_row.set_subtitle("No user-level governor tool found")
+        group.add(self._hk_governor_row)
+
+        # Advanced: shell escape hatch inside an expander row
+        self._hk_advanced_row = Adw.ExpanderRow(
+            title="Advanced — custom shell",
+            subtitle="Runs under /bin/sh as your user. No sandbox.",
+        )
+        group.add(self._hk_advanced_row)
+
+        # Pre-launch shell
+        pre_row = Adw.ActionRow()
+        pre_scroll = Gtk.ScrolledWindow()
+        pre_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        pre_scroll.set_size_request(-1, 80)
+        self._hk_pre_view = Gtk.TextView(
+            monospace=True, top_margin=8, bottom_margin=8, left_margin=8, right_margin=8
+        )
+        self._hk_pre_view.add_css_class("card")
+        self._hk_pre_view.get_buffer().set_text(hk.pre_launch_cmd)
+        self._hk_pre_view.set_tooltip_text(
+            "Runs after toggles. $EXWIN_ISO_MOUNT is set if an ISO was mounted. "
+            "Non-zero exit aborts the launch."
+        )
+        pre_scroll.set_child(self._hk_pre_view)
+        pre_row.set_child(pre_scroll)
+        pre_label = Adw.ActionRow(title="Pre-launch shell")
+        self._hk_advanced_row.add_row(pre_label)
+        self._hk_advanced_row.add_row(pre_row)
+
+        # Post-launch shell
+        post_row = Adw.ActionRow()
+        post_scroll = Gtk.ScrolledWindow()
+        post_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        post_scroll.set_size_request(-1, 80)
+        self._hk_post_view = Gtk.TextView(
+            monospace=True, top_margin=8, bottom_margin=8, left_margin=8, right_margin=8
+        )
+        self._hk_post_view.add_css_class("card")
+        self._hk_post_view.get_buffer().set_text(hk.post_launch_cmd)
+        post_scroll.set_child(self._hk_post_view)
+        post_row.set_child(post_scroll)
+        post_label = Adw.ActionRow(title="Post-launch shell")
+        self._hk_advanced_row.add_row(post_label)
+        self._hk_advanced_row.add_row(post_row)
+
+        self._hk_post_on_crash_row = Adw.SwitchRow(
+            title="Run post-launch shell only on crash",
+            subtitle="Skip post-launch when the game exits cleanly (rc=0)",
+        )
+        self._hk_post_on_crash_row.set_active(hk.post_launch_on_crash_only)
+        self._hk_advanced_row.add_row(self._hk_post_on_crash_row)
+
+        # Expand automatically if any advanced field is non-empty
+        if hk.pre_launch_cmd or hk.post_launch_cmd or hk.post_launch_on_crash_only:
+            self._hk_advanced_row.set_expanded(True)
+
+    def _on_browse_iso(self, _btn: Gtk.Button) -> None:
+        from gi.repository import Gio
+
+        f = Gtk.FileFilter()
+        f.set_name("Disc images (*.iso *.cue *.bin *.img)")
+        for pat in ("*.iso", "*.cue", "*.bin", "*.img"):
+            f.add_pattern(pat)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(f)
+
+        dialog = Gtk.FileDialog(title="Select disc image", filters=filters)
+        dialog.open(self.get_root(), None, self._on_iso_chosen)
+
+    def _on_iso_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        from gi.repository import GLib as _GLib
+
+        try:
+            gfile = dialog.open_finish(result)
+        except _GLib.Error:
+            return
+        self._hk_iso_row.set_text(gfile.get_path())
+
     def _build_cover_art_group(self, prefs: Adw.PreferencesPage, app: AppEntry) -> None:
         group = Adw.PreferencesGroup(
             title="Cover Art",
@@ -392,6 +544,16 @@ class AppSettingsDialog(Adw.Dialog):
             self._apply_wt_btn.add_css_class("flat")
             self._apply_wt_btn.connect("clicked", self._on_apply_winetricks)
             bar.pack_start(self._apply_wt_btn)
+
+        self._upgrade_btn = Gtk.Button(label="Upgrade Prefix")
+        self._upgrade_btn.add_css_class("flat")
+        self._upgrade_btn.set_tooltip_text(
+            "Run `wineboot -u` to refresh system DLLs inside the existing "
+            "prefix. Keeps user data; use this after switching to a newer "
+            "Proton/Wine runtime."
+        )
+        self._upgrade_btn.connect("clicked", self._on_upgrade_prefix)
+        bar.pack_start(self._upgrade_btn)
 
         self._rebuild_btn = Gtk.Button(label="Rebuild Prefix")
         self._rebuild_btn.add_css_class("flat")
@@ -647,6 +809,55 @@ class AppSettingsDialog(Adw.Dialog):
                 msg = f"Winetricks failed — see {log_path}"
             root.show_toast(msg)
 
+    def _on_upgrade_prefix(self, _btn: Gtk.Button) -> None:
+        if self._runtime is None:
+            root = self.get_root()
+            if hasattr(root, "show_toast"):
+                root.show_toast("No runtime selected — assign one first")
+            return
+        self._upgrade_btn.set_sensitive(False)
+        self._upgrade_btn.set_label("Upgrading…")
+        threading.Thread(target=self._upgrade_thread, daemon=True).start()
+
+    def _upgrade_thread(self) -> None:
+        from exwin.backend.prefix_tools import upgrade_prefix
+
+        err: str | None = None
+        rc: int | None = None
+        log_path = self._config.logs_dir / f"{self._app.app_id}-wineboot-u.log"
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "w") as log_file:
+                proc = upgrade_prefix(
+                    self._app.prefix_path,
+                    self._runtime,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                )
+                # wineboot -u normally finishes well under two minutes; guard
+                # against the prefix getting stuck bootstrapping.
+                try:
+                    rc = proc.wait(timeout=180)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    err = "wineboot -u timed out after 3 minutes"
+        except Exception as exc:
+            err = str(exc)
+        GLib.idle_add(self._on_upgrade_done, err, rc, log_path)
+
+    def _on_upgrade_done(self, err: str | None, rc: int | None, log_path: Path) -> None:
+        self._upgrade_btn.set_sensitive(True)
+        self._upgrade_btn.set_label("Upgrade Prefix")
+        root = self.get_root()
+        if not hasattr(root, "show_toast"):
+            return
+        if err:
+            root.show_toast(f"Prefix upgrade failed: {err}")
+        elif rc and rc != 0:
+            root.show_toast(f"wineboot -u exited with rc={rc}; see {log_path}")
+        else:
+            root.show_toast("Prefix upgraded")
+
     def _on_rebuild_prefix(self, _btn: Gtk.Button) -> None:
         if self._runtime is None:
             root = self.get_root()
@@ -701,6 +912,8 @@ class AppSettingsDialog(Adw.Dialog):
         """Capture current field values for dirty comparison."""
         env_buf = self._env_view.get_buffer()
         dll_buf = self._dll_view.get_buffer()
+        pre_buf = self._hk_pre_view.get_buffer()
+        post_buf = self._hk_post_view.get_buffer()
         return {
             "exe": self._exe_row.get_text(),
             "arch": self._arch_row.get_selected(),
@@ -716,6 +929,14 @@ class AppSettingsDialog(Adw.Dialog):
             "dll": dll_buf.get_text(dll_buf.get_start_iter(), dll_buf.get_end_iter(), False),
             "runtime": self._runtime_row.get_selected() if self._runtime_row else 0,
             "gpu": self._gpu_row.get_selected() if self._gpu_row else 0,
+            "hk_iso": self._hk_iso_row.get_text(),
+            "hk_kill": self._hk_kill_row.get_text(),
+            "hk_compositor": self._hk_compositor_row.get_active(),
+            "hk_governor": self._hk_governor_row.get_active(),
+            "hk_pre": pre_buf.get_text(pre_buf.get_start_iter(), pre_buf.get_end_iter(), False),
+            "hk_post": post_buf.get_text(post_buf.get_start_iter(), post_buf.get_end_iter(), False),
+            "hk_post_on_crash": self._hk_post_on_crash_row.get_active(),
+            "umu": self._umu_row.get_selected(),
         }
 
     def _is_dirty(self) -> bool:
@@ -794,6 +1015,9 @@ class AppSettingsDialog(Adw.Dialog):
             gpu_sel = self._gpu_row.get_selected()
             gpu_index = None if gpu_sel == 0 else (gpu_sel - 1)
 
+        umu_sel = self._umu_row.get_selected()
+        use_umu: bool | None = None if umu_sel == 0 else (umu_sel == 1)
+
         return AppConfig(
             arch=_ARCH_OPTIONS[self._arch_row.get_selected()],
             winetricks_verbs=verbs,
@@ -805,8 +1029,29 @@ class AppSettingsDialog(Adw.Dialog):
             mangohud=self._mangohud_row.get_active(),
             dll_overrides=dll_overrides,
             gpu_index=gpu_index,
+            use_umu=use_umu,
             save_path=self._save_path_row.get_text().strip(),
             gamescope=self._read_gamescope_config(),
+            hooks=self._read_hook_config(),
+        )
+
+    def _read_hook_config(self) -> HookConfig:
+        kill_raw = self._hk_kill_row.get_text().strip()
+        kill_list = [s.strip() for s in kill_raw.split(",") if s.strip()] if kill_raw else []
+
+        pre_buf = self._hk_pre_view.get_buffer()
+        post_buf = self._hk_post_view.get_buffer()
+        pre_text = pre_buf.get_text(pre_buf.get_start_iter(), pre_buf.get_end_iter(), False)
+        post_text = post_buf.get_text(post_buf.get_start_iter(), post_buf.get_end_iter(), False)
+
+        return HookConfig(
+            mount_iso=self._hk_iso_row.get_text().strip(),
+            kill_processes=kill_list,
+            suspend_kde_compositor=self._hk_compositor_row.get_active(),
+            cpu_performance_governor=self._hk_governor_row.get_active(),
+            pre_launch_cmd=pre_text.strip(),
+            post_launch_cmd=post_text.strip(),
+            post_launch_on_crash_only=self._hk_post_on_crash_row.get_active(),
         )
 
     def _read_gamescope_config(self) -> GamescopeConfig:

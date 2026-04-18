@@ -295,3 +295,211 @@ class TestLaunchLifecycle:
     def test_stop_noop_when_not_running(self, launcher: Launcher) -> None:
         # Should not raise
         launcher.stop("nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# Hook integration
+# ---------------------------------------------------------------------------
+
+
+class TestHookIntegration:
+    def test_hooks_sequenced_pre_and_post(
+        self, tmp_config: Config, app: AppEntry, wine_rt: Runtime
+    ) -> None:
+        """Pre-hooks run before game Popen; post-hooks after it exits."""
+        from exwin.backend.app_config import HookConfig
+        from exwin.db.schema import init_db
+
+        init_db(tmp_config.data_dir)
+        launcher = Launcher(tmp_config)
+
+        events: list[str] = []
+
+        def fake_pre(hooks, env, log):
+            events.append("pre")
+            from exwin.backend.hooks import HookState
+
+            return HookState()
+
+        def fake_post(hooks, state, rc, env, log):
+            events.append("post")
+
+        app_cfg = AppConfig(hooks=HookConfig(mount_iso="/not/real"))
+        with (
+            patch.object(launcher, "build_command", return_value=["/bin/true"]),
+            patch("exwin.backend.launcher.apply_pre_hooks", side_effect=fake_pre),
+            patch("exwin.backend.launcher.apply_post_hooks", side_effect=fake_post),
+            patch("exwin.backend.launcher.GLib") as mock_glib,
+        ):
+            mock_glib.idle_add.side_effect = lambda fn, *args: fn(*args)
+
+            # Wrap Popen so we can slot an event between pre and post.
+            real_popen = __import__("subprocess").Popen
+
+            def wrapped_popen(*args, **kwargs):
+                events.append("popen")
+                return real_popen(*args, **kwargs)
+
+            with patch("exwin.backend.launcher.subprocess.Popen", side_effect=wrapped_popen):
+                launcher.launch(app=app, runtime=wine_rt, app_config=app_cfg)
+                _wait_done(launcher, app.app_id)
+
+        assert events == ["pre", "popen", "post"]
+
+    def test_hook_abort_synthesises_crash_and_skips_popen(
+        self, tmp_config: Config, app: AppEntry, wine_rt: Runtime
+    ) -> None:
+        from exwin.backend.app_config import HookConfig
+        from exwin.backend.crash_detect import CrashInfo
+        from exwin.backend.hooks import HookAbort
+        from exwin.db.schema import init_db
+
+        init_db(tmp_config.data_dir)
+        launcher = Launcher(tmp_config)
+
+        def raising_pre(hooks, env, log):
+            raise HookAbort("pre_launch_cmd exited rc=3", output="broke")
+
+        crashes: list[CrashInfo] = []
+        app_cfg = AppConfig(hooks=HookConfig(pre_launch_cmd="exit 3"))
+
+        with (
+            patch("exwin.backend.launcher.apply_pre_hooks", side_effect=raising_pre),
+            patch("exwin.backend.launcher.subprocess.Popen") as mock_popen,
+            patch("exwin.backend.launcher.GLib") as mock_glib,
+        ):
+            mock_glib.idle_add.side_effect = lambda fn, *args: fn(*args)
+            launcher.launch(
+                app=app,
+                runtime=wine_rt,
+                app_config=app_cfg,
+                on_crash=crashes.append,
+            )
+
+        mock_popen.assert_not_called()
+        assert len(crashes) == 1
+        assert "pre_launch_cmd exited rc=3" in crashes[0].reason
+        assert crashes[0].rc == -1
+        assert "broke" in crashes[0].log_tail
+
+
+# ---------------------------------------------------------------------------
+# umu-launcher integration
+# ---------------------------------------------------------------------------
+
+
+class TestUmuLauncher:
+    def test_umu_cmd_proton(self, launcher: Launcher, app: AppEntry, proton_rt: Runtime) -> None:
+        """Proton + umu available + enabled → ``umu-run <exe>`` replaces direct proton call."""
+        cfg = AppConfig()  # use_umu defaults to None → follows global (True)
+        with patch("exwin.backend.umu.shutil.which", return_value="/usr/bin/umu-run"):
+            cmd = launcher.build_command(app, proton_rt, cfg)
+        assert cmd[0] == "umu-run"
+        assert cmd[1].endswith("Game.exe")
+        assert "waitforexitandrun" not in cmd
+
+    def test_umu_disabled_falls_back(
+        self, launcher: Launcher, app: AppEntry, proton_rt: Runtime
+    ) -> None:
+        """Global use_umu=False → direct proton even when umu installed."""
+        launcher._config.use_umu = False
+        cfg = AppConfig()
+        with patch("exwin.backend.umu.shutil.which", return_value="/usr/bin/umu-run"):
+            cmd = launcher.build_command(app, proton_rt, cfg)
+        assert cmd[0] == "/opt/proton/proton"
+        assert cmd[1] == "waitforexitandrun"
+
+    def test_umu_missing_binary_falls_back(
+        self, launcher: Launcher, app: AppEntry, proton_rt: Runtime
+    ) -> None:
+        """umu-run not on PATH → direct proton regardless of config."""
+        cfg = AppConfig()
+        with patch("exwin.backend.umu.shutil.which", return_value=None):
+            cmd = launcher.build_command(app, proton_rt, cfg)
+        assert cmd[0] == "/opt/proton/proton"
+
+    def test_umu_wine_runtime_unchanged(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime
+    ) -> None:
+        """Wine runtime is never wrapped in umu, even when installed."""
+        cfg = AppConfig()
+        with patch("exwin.backend.umu.shutil.which", return_value="/usr/bin/umu-run"):
+            cmd = launcher.build_command(app, wine_rt, cfg)
+        assert "umu-run" not in cmd
+        assert cmd[0] == "/usr/bin/wine"
+
+    def test_umu_per_app_override_off(
+        self, launcher: Launcher, app: AppEntry, proton_rt: Runtime
+    ) -> None:
+        """Per-app use_umu=False overrides a True global."""
+        launcher._config.use_umu = True
+        cfg = AppConfig(use_umu=False)
+        with patch("exwin.backend.umu.shutil.which", return_value="/usr/bin/umu-run"):
+            cmd = launcher.build_command(app, proton_rt, cfg)
+        assert cmd[0] == "/opt/proton/proton"
+
+    def test_umu_per_app_override_on(
+        self, launcher: Launcher, app: AppEntry, proton_rt: Runtime
+    ) -> None:
+        """Per-app use_umu=True overrides a False global."""
+        launcher._config.use_umu = False
+        cfg = AppConfig(use_umu=True)
+        with patch("exwin.backend.umu.shutil.which", return_value="/usr/bin/umu-run"):
+            cmd = launcher.build_command(app, proton_rt, cfg)
+        assert cmd[0] == "umu-run"
+
+    def test_umu_gamescope_wraps_umu(
+        self, launcher: Launcher, app: AppEntry, proton_rt: Runtime
+    ) -> None:
+        """gamescope still prefixes the command; umu-run becomes the inner cmd."""
+        cfg = AppConfig(
+            gamescope=GamescopeConfig(enabled=True, output_width=1920),
+        )
+
+        def _which(name: str) -> str | None:
+            return f"/usr/bin/{name}" if name in {"gamescope", "umu-run"} else None
+
+        with (
+            patch("exwin.backend.launcher.shutil.which", side_effect=_which),
+            patch("exwin.backend.umu.shutil.which", side_effect=_which),
+        ):
+            cmd = launcher.build_command(app, proton_rt, cfg)
+        assert cmd[0] == "gamescope"
+        sep = cmd.index("--")
+        assert cmd[sep + 1] == "umu-run"
+        assert cmd[sep + 2].endswith("Game.exe")
+
+    def test_umu_env_sets_gameid_and_protonpath(
+        self, launcher: Launcher, app: AppEntry, proton_rt: Runtime
+    ) -> None:
+        """umu path sets GAMEID, PROTONPATH, WINEPREFIX and skips STEAM_COMPAT_*."""
+        cfg = AppConfig()
+        with patch("exwin.backend.umu.shutil.which", return_value="/usr/bin/umu-run"):
+            env = launcher.build_env(app, proton_rt, cfg)
+        assert env["GAMEID"] == "0"
+        assert env["PROTONPATH"] == "/opt/proton"
+        assert env["WINEPREFIX"] == str(app.prefix_path / "pfx")
+        assert "STEAM_COMPAT_DATA_PATH" not in env
+
+    def test_umu_env_uses_steam_appid_when_known(
+        self, launcher: Launcher, app: AppEntry, proton_rt: Runtime
+    ) -> None:
+        app.steam_appid = 220
+        cfg = AppConfig()
+        with patch("exwin.backend.umu.shutil.which", return_value="/usr/bin/umu-run"):
+            env = launcher.build_env(app, proton_rt, cfg)
+        assert env["GAMEID"] == "220"
+
+
+def _wait_done(launcher: Launcher, app_id: str, timeout: float = 5.0) -> None:
+    import threading as _t
+
+    deadline = _t.Event()
+    t = _t.Timer(timeout, deadline.set)
+    t.daemon = True
+    t.start()
+    try:
+        while launcher.is_running(app_id) and not deadline.is_set():
+            deadline.wait(0.02)
+    finally:
+        t.cancel()

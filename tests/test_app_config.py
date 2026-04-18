@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from exwin.backend.app_config import AppConfig, GamescopeConfig, load_app_config, save_app_config
+from exwin.backend.app_config import (
+    AppConfig,
+    GamescopeConfig,
+    HookConfig,
+    load_app_config,
+    save_app_config,
+)
 from exwin.backend.config import Config
 
 # ---------------------------------------------------------------------------
@@ -103,6 +109,26 @@ class TestRoundTrip:
         loaded = self._save_load(cfg, AppConfig(gpu_index=None))
         assert loaded.gpu_index is None
 
+    def test_use_umu_default_none(self, cfg: Config) -> None:
+        loaded = self._save_load(cfg, AppConfig())
+        assert loaded.use_umu is None
+
+    def test_use_umu_force_on(self, cfg: Config) -> None:
+        loaded = self._save_load(cfg, AppConfig(use_umu=True))
+        assert loaded.use_umu is True
+
+    def test_use_umu_force_off(self, cfg: Config) -> None:
+        loaded = self._save_load(cfg, AppConfig(use_umu=False))
+        assert loaded.use_umu is False
+
+    def test_use_umu_none_not_written(self, cfg: Config) -> None:
+        import tomllib
+
+        save_app_config("myapp", cfg, AppConfig(use_umu=None))
+        with open(cfg.apps_dir / "myapp" / "app.toml", "rb") as f:
+            raw = tomllib.load(f)
+        assert "use_umu" not in raw.get("launch", {})
+
     def test_all_fields_together(self, cfg: Config) -> None:
         ac = AppConfig(
             arch="win32",
@@ -184,3 +210,52 @@ class TestGamescopeRoundTrip:
         assert loaded.gamescope.enabled is False
         assert loaded.gamescope.output_width == 2560
         assert loaded.gamescope.upscale_filter == "nis"
+
+
+# ---------------------------------------------------------------------------
+# HookConfig round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestHooksRoundTrip:
+    def _save_load(self, cfg: Config, ac: AppConfig) -> AppConfig:
+        save_app_config("myapp", cfg, ac)
+        return load_app_config("myapp", cfg)
+
+    def test_defaults_not_written(self, cfg: Config) -> None:
+        save_app_config("myapp", cfg, AppConfig())
+        toml_text = (cfg.apps_dir / "myapp" / "app.toml").read_text()
+        assert "[hooks]" not in toml_text
+
+    def test_defaults_loaded(self, cfg: Config) -> None:
+        ac = load_app_config("myapp", cfg)
+        assert ac.hooks == HookConfig()
+
+    def test_iso_round_trip(self, cfg: Config) -> None:
+        hk = HookConfig(mount_iso="/mnt/games/RA3.iso")
+        loaded = self._save_load(cfg, AppConfig(hooks=hk))
+        assert loaded.hooks.mount_iso == "/mnt/games/RA3.iso"
+
+    def test_kill_processes_round_trip(self, cfg: Config) -> None:
+        hk = HookConfig(kill_processes=["discord", "obs"])
+        loaded = self._save_load(cfg, AppConfig(hooks=hk))
+        assert loaded.hooks.kill_processes == ["discord", "obs"]
+
+    def test_all_fields_round_trip(self, cfg: Config) -> None:
+        hk = HookConfig(
+            mount_iso="/tmp/x.iso",
+            kill_processes=["a", "b"],
+            suspend_kde_compositor=True,
+            cpu_performance_governor=True,
+            pre_launch_cmd="echo hi",
+            post_launch_cmd="echo bye",
+            post_launch_on_crash_only=True,
+        )
+        loaded = self._save_load(cfg, AppConfig(hooks=hk))
+        assert loaded.hooks == hk
+
+    def test_table_written_only_when_non_default(self, cfg: Config) -> None:
+        save_app_config("myapp", cfg, AppConfig(hooks=HookConfig(pre_launch_cmd="x")))
+        toml_text = (cfg.apps_dir / "myapp" / "app.toml").read_text()
+        assert "[hooks]" in toml_text
+        assert "pre_launch_cmd" in toml_text

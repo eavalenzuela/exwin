@@ -13,6 +13,7 @@ from gi.repository import Adw, GObject, Gtk  # noqa: E402
 
 from exwin.backend.app_config import load_app_config  # noqa: E402
 from exwin.backend.config import Config  # noqa: E402
+from exwin.backend.crash_detect import CrashInfo  # noqa: E402
 from exwin.backend.launcher import Launcher  # noqa: E402
 from exwin.backend.runtime import Runtime  # noqa: E402
 from exwin.backend.uninstall import uninstall_app  # noqa: E402
@@ -263,7 +264,7 @@ class ExwinWindow(Adw.ApplicationWindow):
     # App lifecycle
     # ------------------------------------------------------------------
 
-    def _launch_app(self, app: AppEntry) -> None:
+    def _launch_app(self, app: AppEntry, debug: bool = False) -> None:
         runtime = self._resolve_runtime(app)
         if runtime is None:
             self.show_toast("No Wine/Proton runtime found — add one in Settings")
@@ -275,14 +276,19 @@ class ExwinWindow(Adw.ApplicationWindow):
             self.show_toast(f'"{app.name}" has no executable configured')
             return
 
+        # Debug rerun: set WINEDEBUG for this launch only (not persisted).
+        if debug:
+            app_config.env = {**app_config.env, "WINEDEBUG": "+warn,+err,+loaddll"}
+
         self._launcher.launch(
             app=app,
             runtime=runtime,
             app_config=app_config,
             on_exit=self._on_app_exited,
+            on_crash=self._on_app_crashed,
         )
         self.refresh_library()
-        self.show_toast(f'Launched "{app.name}"')
+        self.show_toast(f'Launched "{app.name}"' + (" (debug)" if debug else ""))
 
     def _stop_app(self, app: AppEntry) -> None:
         self._launcher.stop(app.app_id)
@@ -306,6 +312,29 @@ class ExwinWindow(Adw.ApplicationWindow):
             gio_app = self.get_application()
             if gio_app:
                 gio_app.send_notification(f"app-exit-{app_id}", notification)
+
+    def _on_app_crashed(self, info: CrashInfo) -> None:
+        from exwin.ui.crash_dialog import CrashDialog
+
+        dialog = CrashDialog(
+            info=info,
+            on_rerun_debug=lambda app: self._launch_app(app, debug=True),
+            on_view_protondb=self._view_protondb_for,
+            on_toast=self.show_toast,
+        )
+        dialog.present(self)
+
+    def _view_protondb_for(self, app: AppEntry) -> None:
+        from exwin.ui.protondb_dialog import ProtonDBDialog
+
+        app_config = load_app_config(app.app_id, self._config)
+        dialog = ProtonDBDialog(
+            app=app,
+            app_config=app_config,
+            config=self._config,
+            on_toast=self.show_toast,
+        )
+        dialog.present(self)
 
     def _uninstall_app(self, app: AppEntry, delete_files: bool) -> None:
         uninstall_app(app, self._config, delete_files)
