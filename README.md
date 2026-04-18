@@ -1,6 +1,6 @@
 # exwin
 
-**v0.3.0**
+**v0.4.0**
 
 Offline-first Windows software/game manager for Linux — "offline Steam" with a Proton/Wine backend and first-class GOG offline installer automation.
 
@@ -52,7 +52,7 @@ python -m venv --system-site-packages .venv   # system-site-packages needed for 
 
 ## Changelog
 
-### Unreleased
+### v0.4.0 (2026-04-18)
 - Five launch/import features landed together:
   - **Crash / short-run detection** — `backend/crash_detect.py` builds a `CrashInfo` when a game exits non-zero under `Config.crash_threshold_seconds`; `ui/crash_dialog.py` surfaces the log tail, runtime, prefix arch, and a "View Log" button; user-initiated stops suppress the dialog
   - **Folder / portable-game import** — `backend/folder_import.py` scans a chosen directory for candidate exes (shared with the post-install picker), registers it as a `MANUAL` app with its own prefix; "Add Existing" flow in `ui/add_existing_dialog.py`

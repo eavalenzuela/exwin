@@ -16,7 +16,10 @@ Recommends: innoextract,
  mangohud,
  gamemode,
  gamescope
-Suggests: p7zip-full
+Suggests: p7zip-full,
+ fuseiso,
+ udisks2,
+ power-profiles-daemon
 Homepage: https://github.com/anthropics/exwin
 Description: Offline Windows software/game manager for Linux
  exwin is a GTK4/libadwaita application that manages Windows games and

@@ -39,6 +39,24 @@
   <launchable type="desktop-id">io.github.exwin.desktop</launchable>
 
   <releases>
+    <release version="0.4.0" date="2026-04-18">
+      <description>
+        <p>Eleven new features across two batches: installer types, per-game overlays, online lookups, launch hardening, and portable import.</p>
+        <ul>
+          <li>Archive installers (.zip, .7z, .rar) with auto-flattening and shared exe heuristics</li>
+          <li>MSI installers via wine msiexec /i</li>
+          <li>Searchable, categorised winetricks verb picker with bundled catalog fallback</li>
+          <li>Redistributable auto-scan with one-click run or equivalent winetricks verb</li>
+          <li>Per-game gamescope wrapper (FSR/NIS upscaling, HDR, frame cap, MangoApp overlay)</li>
+          <li>ProtonDB lookup with one-click apply of parsed launch args, env vars, verbs, and DLL overrides (7-day disk cache)</li>
+          <li>Crash / short-run detection with log tail, runtime, and prefix arch surfaced in a dialog</li>
+          <li>Folder / portable-game import for already-extracted Windows games</li>
+          <li>One-click prefix upgrade via wineboot -u</li>
+          <li>Pre/post-launch hooks: ISO mount, kill processes, KDE compositor, CPU governor, and /bin/sh escape hatch</li>
+          <li>umu-launcher integration with tri-state per-app override and graceful fallback</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-03-24">
       <description>
         <p>UI/UX fixes and quality improvements: dialog sizing, visual test coverage, install dialog refactoring.</p>
