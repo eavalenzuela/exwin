@@ -56,6 +56,36 @@ class TestScanFolderForExes:
         result = scan_folder_for_exes(tmp_path)
         assert result[0].name == "Game.exe"
 
+    def test_lnk_target_beats_heuristics(self, tmp_path: Path) -> None:
+        """A .lnk stub's target outranks the size/depth score of other exes."""
+        from tests.test_lnk import _make_lnk
+
+        root = tmp_path / "game"
+        (root / "bin").mkdir(parents=True)
+        # Big decoy that would win on size…
+        (root / "Editor.exe").write_bytes(b"x" * 2_000_000)
+        # …but the publisher's shortcut points at the real (small, deep) binary.
+        real = root / "bin" / "actual.exe"
+        real.write_bytes(b"x" * 100)
+        (root / "Play Game.lnk").write_bytes(_make_lnk(relative=".\\bin\\actual.exe"))
+
+        result = scan_folder_for_exes(root)
+        assert result[0] == real.resolve()
+        assert {p.name for p in result} == {"actual.exe", "Editor.exe"}
+
+    def test_lnk_to_cleanup_stub_not_promoted(self, tmp_path: Path) -> None:
+        """Shortcut stubs pointing at filtered artefacts don't get promoted."""
+        from tests.test_lnk import _make_lnk
+
+        root = tmp_path / "game"
+        root.mkdir()
+        (root / "Game.exe").write_bytes(b"x" * 1000)
+        (root / "unins000.exe").write_bytes(b"x" * 500)
+        (root / "Uninstall.lnk").write_bytes(_make_lnk(relative=".\\unins000.exe"))
+
+        result = scan_folder_for_exes(root)
+        assert [p.name for p in result] == ["Game.exe"]
+
 
 # ---------------------------------------------------------------------------
 # copy_folder_into_installs

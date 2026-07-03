@@ -34,6 +34,7 @@ class Config:
     backup_max_count: int = 5  # max save backups per game (0 = unlimited)
     crash_threshold_seconds: int = 5  # short-run + non-zero rc under this → show crash dialog
     use_umu: bool = True  # use umu-launcher for Proton runtimes when available
+    inhibit_idle: bool = True  # hold a systemd idle/sleep inhibitor while a game runs
 
     # Window state (restored on startup)
     window_width: int = 1100
@@ -106,8 +107,22 @@ class Config:
             cfg.save()
             return cfg
 
-        with open(config_path, "rb") as f:
-            raw = tomllib.load(f)
+        try:
+            with open(config_path, "rb") as f:
+                raw = tomllib.load(f)
+        except (tomllib.TOMLDecodeError, OSError) as exc:
+            # A corrupt/unreadable config must never brick startup.  Preserve
+            # the bad file for inspection and continue with defaults.
+            _log.warning("Could not parse %s (%s) — falling back to defaults.", config_path, exc)
+            try:
+                config_path.replace(config_path.with_name(_CONFIG_FILENAME + ".bad"))
+                _log.warning("Corrupt config backed up to %s.bad", config_path)
+            except OSError:
+                pass
+            cfg = cls(data_dir=base_dir)
+            cfg._ensure_dirs()
+            cfg.save()
+            return cfg
 
         raw_sr = raw.get("storage_root")
         win = raw.get("window", {})
@@ -119,6 +134,7 @@ class Config:
             backup_max_count=raw.get("backup_max_count", 5),
             crash_threshold_seconds=raw.get("crash_threshold_seconds", 5),
             use_umu=raw.get("use_umu", True),
+            inhibit_idle=raw.get("inhibit_idle", True),
             window_width=win.get("width", 1100),
             window_height=win.get("height", 700),
             sidebar_visible=win.get("sidebar_visible", True),
@@ -136,6 +152,7 @@ class Config:
             "backup_max_count": self.backup_max_count,
             "crash_threshold_seconds": self.crash_threshold_seconds,
             "use_umu": self.use_umu,
+            "inhibit_idle": self.inhibit_idle,
         }
         if self.storage_root is not None:
             data["storage_root"] = str(self.storage_root)

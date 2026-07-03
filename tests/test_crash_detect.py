@@ -35,6 +35,25 @@ class TestReadLogTail:
         log.write_text("one\ntwo\nthree")
         assert read_log_tail(log, tail_lines=40) == "one\ntwo\nthree"
 
+    def test_huge_log_reads_bounded(self, tmp_path: Path) -> None:
+        """Only the final 64 KiB of a giant log is read — never the whole file."""
+        log = tmp_path / "huge.log"
+        with open(log, "w") as f:
+            f.write("x" * (1024 * 1024))  # 1 MiB single line
+            f.write("\nfinal line")
+        tail = read_log_tail(log, tail_lines=40)
+        assert len(tail) <= 64 * 1024
+        assert tail.endswith("final line")
+
+    def test_huge_log_drops_partial_first_line(self, tmp_path: Path) -> None:
+        log = tmp_path / "huge.log"
+        with open(log, "w") as f:
+            for i in range(20000):
+                f.write(f"line {i}\n")
+        tail = read_log_tail(log, tail_lines=10)
+        lines = tail.splitlines()
+        assert lines == [f"line {i}" for i in range(19990, 20000)]
+
 
 class TestBuildCrashInfo:
     def test_populates_fields(self, tmp_path: Path) -> None:

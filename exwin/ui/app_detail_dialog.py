@@ -25,7 +25,7 @@ from exwin.backend.saves import (  # noqa: E402
     restore_saves,
 )
 from exwin.models import AppEntry  # noqa: E402
-from exwin.ui.library_page import _fmt_playtime  # noqa: E402
+from exwin.util import fmt_playtime as _fmt_playtime  # noqa: E402
 
 
 class AppDetailDialog(Adw.Dialog):

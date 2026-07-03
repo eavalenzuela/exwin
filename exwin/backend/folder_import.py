@@ -12,7 +12,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from exwin.backend.config import Config
-from exwin.backend.exe_filter import UNLIKELY_STEMS, pick_best_exe, scan_dir_for_exes
+from exwin.backend.exe_filter import UNLIKELY_STEMS, pick_best_exe, scan_dir_for_exes, should_skip
+from exwin.backend.lnk import resolve_lnk_targets
 
 
 def scan_folder_for_exes(root: Path) -> list[Path]:
@@ -21,8 +22,22 @@ def scan_folder_for_exes(root: Path) -> list[Path]:
     The first entry is the heuristic best match (what :func:`pick_best_exe`
     selects); remaining entries are the rest of the candidates, sorted by the
     same "likely game binary" score so the user sees useful alternatives first.
+
+    ``.lnk`` shortcut stubs (GOG installers leave them pointing at the real
+    binary) are resolved first; a shortcut target beats the size/depth
+    heuristics because it encodes the publisher's intent.
     """
     candidates = scan_dir_for_exes(root)
+
+    # Shortcut targets outrank heuristics — promote them to the front.
+    lnk_targets = [t for t in resolve_lnk_targets(root) if not should_skip(t)]
+    if lnk_targets:
+        # Dedup on resolved paths: lnk targets are resolved, rglob hits may not be.
+        target_set = {t.resolve() for t in lnk_targets}
+        rest = [c for c in candidates if c.resolve() not in target_set]
+        rest.sort(key=_rank_key)
+        return [*lnk_targets, *rest]
+
     if not candidates:
         return []
     best = pick_best_exe(candidates)

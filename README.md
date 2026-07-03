@@ -11,7 +11,7 @@ Offline-first Windows software/game manager for Linux — "offline Steam" with a
 - **Archive installers** — install games shipped as plain `.zip`, `.7z`, or `.rar` archives (itch.io, indies, abandonware); auto-detect main exe after extraction
 - **MSI installers** — run `.msi` installers via `wine msiexec /i`
 - **Generic installer support** — run any Windows installer interactively via Wine, then select the resulting executable
-- **Library management** — searchable grid view with cover art; per-game settings persisted to `~/.local/share/exwin/`
+- **Library management** — searchable grid view with cover art (search matches names and tags); per-game settings persisted to `~/.exwin/`
 - **Proton & Wine support** — launch games via any Proton (including Proton-GE) or Wine runtime detected under `~/.steam/root/`
 - **Proton-GE installer** — fetch and install the latest Proton-GE release from within the app
 - **DXVK / VKD3D-Proton** — one-click install via winetricks or bundled setup scripts
@@ -27,7 +27,12 @@ Offline-first Windows software/game manager for Linux — "offline Steam" with a
 - **Prefix upgrade** — one-click `wineboot -u` to refresh system DLLs after switching runtimes, preserving installed winetricks verbs and user data
 - **Custom cover art** — set cover art from a local image file or an image URL in per-game settings
 - **GOG metadata fetch** — pull title, description, and cover art from the GOG products API
-- **Per-game configuration** — architecture (win32/win64), DXVK, VKD3D, winetricks verbs, gamemode, MangoHud, launch arguments, environment variables, DLL overrides, GPU override, gamescope, umu toggle, pre/post-launch hooks
+- **Sleep inhibit during play** — hold a `systemd-inhibit` idle/sleep inhibitor for the whole game session (global toggle)
+- **Wine sync & driver knobs** — per-game ESYNC/FSYNC tri-state, NVAPI/DLSS passthrough, locale override for region-locked titles, per-app DXVK shader cache
+- **CPU affinity** — per-game `taskset -c` core pinning for old titles that break on high core counts
+- **`.lnk` shortcut resolution** — folder import parses Windows shortcut stubs and promotes their targets to the top of the exe candidate list
+- **CLI** — `list`, `info`, `launch`, `remove`, `migrate`, `backup-saves`, `restore-saves`, `backups` subcommands; the CLI never loads GTK
+- **Per-game configuration** — architecture (win32/win64), DXVK, VKD3D, ESYNC/FSYNC, NVAPI, locale, CPU affinity, winetricks verbs, gamemode, MangoHud, launch arguments, environment variables, DLL overrides, GPU override, gamescope, umu toggle, pre/post-launch hooks
 
 ## Requirements
 
@@ -40,6 +45,8 @@ Offline-first Windows software/game manager for Linux — "offline Steam" with a
 - `umu-run` (umu-launcher) — optional, enables Proton launches via the canonical Steam-compat entry point with ProtonFixes per-game support
 - `udisksctl` / `fuseiso` — optional, used by the "Mount disc image" pre-launch hook
 - `powerprofilesctl` — optional, used by the "CPU performance governor" pre-launch hook
+- `systemd-inhibit` — optional, enables the "prevent sleep during play" inhibitor
+- `taskset` (util-linux) — optional, enables per-game CPU affinity
 - Proton or Wine runtime installed and discoverable under `~/.steam/root/`
 
 ## Installation / Running
@@ -51,6 +58,23 @@ python -m venv --system-site-packages .venv   # system-site-packages needed for 
 ```
 
 ## Changelog
+
+### Unreleased
+- **Sleep/idle inhibit during play** — launches are wrapped in `systemd-inhibit --what=idle:sleep` (global "Prevent sleep during play" toggle; skipped when systemd-inhibit is absent)
+- **Wine sync / NVAPI / locale env knobs** — per-app ESYNC and FSYNC tri-states (`WINEESYNC`/`WINEFSYNC` on Wine, inverted `PROTON_NO_ESYNC`/`PROTON_NO_FSYNC` on Proton), NVAPI/DLSS passthrough (`PROTON_ENABLE_NVAPI` + `DXVK_ENABLE_NVAPI`), locale override (`LANG`/`LC_ALL`), and a per-app DXVK state cache under the prefix (`DXVK_STATE_CACHE_PATH`)
+- **CPU affinity** — per-app `taskset -c <list>` wrapper with validated cpu-list entry in the settings dialog
+- **CLI `info` + `backups`** — `exwin info <id>` prints paths/runtime/playtime/ProtonDB/config summary; `exwin backups <id>` lists save backups with timestamp and size
+- **`.lnk` shortcut resolution** — `backend/lnk.py` parses [MS-SHLLINK] LocalBasePath/RelativePath; folder import promotes shortcut targets over size/depth heuristics
+- Stop now signals the whole process group — stopping a Proton/umu/gamescope-wrapped game no longer leaves the game itself running
+- Headless `exwin launch` applies pre/post-launch hooks (parity with the GUI)
+- The CLI no longer imports GTK (`fmt_playtime` moved to `exwin/util.py`) — `exwin list` works on headless machines
+- Corrupt `config.toml` no longer crashes startup; it is backed up to `config.toml.bad` and defaults are used
+- Launch logs keep one previous generation as `<id>.log.1`
+- Crash-dialog log tails read at most the final 64 KiB of the log
+- Subcommands reject unrecognised arguments instead of silently ignoring typos like `--delete-file`
+- Uninstalling a running game stops it first
+- Library search also matches tags
+- README: corrected default data dir (`~/.exwin/`, override with `EXWIN_DATA_DIR`)
 
 ### v0.4.0 (2026-04-18)
 - Five launch/import features landed together:
@@ -91,13 +115,18 @@ python -m venv --system-site-packages .venv   # system-site-packages needed for 
 
 ## Data layout
 
+Default data directory is `~/.exwin/` (override with the `EXWIN_DATA_DIR`
+environment variable; game files and prefixes can also be redirected to an
+external drive via the `storage_root` setting).
+
 ```
-~/.local/share/exwin/
+~/.exwin/
 ├── library.db          # SQLite app registry
 ├── config.toml         # global config (data_dir, default runtime, etc.)
 ├── prefixes/<id>/      # Wine/Proton prefix roots
 ├── apps/<id>/          # install dirs + app.toml per-game config
 ├── metadata/<id>/      # cover art cache
 ├── runtimes/           # downloaded runtimes (Proton-GE, etc.)
+├── saves/<id>/         # save backups (timestamped zips)
 └── logs/
 ```

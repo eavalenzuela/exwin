@@ -129,6 +129,41 @@ class TestRoundTrip:
             raw = tomllib.load(f)
         assert "use_umu" not in raw.get("launch", {})
 
+    def test_esync_fsync_default_none(self, cfg: Config) -> None:
+        loaded = self._save_load(cfg, AppConfig())
+        assert loaded.esync is None
+        assert loaded.fsync is None
+
+    def test_esync_fsync_roundtrip(self, cfg: Config) -> None:
+        loaded = self._save_load(cfg, AppConfig(esync=True, fsync=False))
+        assert loaded.esync is True
+        assert loaded.fsync is False
+
+    def test_esync_none_not_written(self, cfg: Config) -> None:
+        import tomllib
+
+        save_app_config("myapp", cfg, AppConfig(esync=None, fsync=None))
+        with open(cfg.apps_dir / "myapp" / "app.toml", "rb") as f:
+            raw = tomllib.load(f)
+        assert "esync" not in raw.get("wine", {})
+        assert "fsync" not in raw.get("wine", {})
+
+    def test_nvapi_roundtrip(self, cfg: Config) -> None:
+        loaded = self._save_load(cfg, AppConfig(nvapi=True))
+        assert loaded.nvapi is True
+
+    def test_dxvk_state_cache_roundtrip(self, cfg: Config) -> None:
+        loaded = self._save_load(cfg, AppConfig(dxvk_state_cache=True))
+        assert loaded.dxvk_state_cache is True
+
+    def test_locale_roundtrip(self, cfg: Config) -> None:
+        loaded = self._save_load(cfg, AppConfig(locale="ja_JP.UTF-8"))
+        assert loaded.locale == "ja_JP.UTF-8"
+
+    def test_cpu_affinity_roundtrip(self, cfg: Config) -> None:
+        loaded = self._save_load(cfg, AppConfig(cpu_affinity="0-3"))
+        assert loaded.cpu_affinity == "0-3"
+
     def test_all_fields_together(self, cfg: Config) -> None:
         ac = AppConfig(
             arch="win32",

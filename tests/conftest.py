@@ -13,8 +13,13 @@ from exwin.db.schema import init_db
 
 @pytest.fixture
 def tmp_config(tmp_path: Path) -> Config:
-    """A Config rooted in a temporary directory with all subdirs created."""
-    cfg = Config(data_dir=tmp_path / "exwin")
+    """A Config rooted in a temporary directory with all subdirs created.
+
+    ``inhibit_idle`` is disabled so command-building tests are deterministic
+    regardless of whether the host has systemd-inhibit installed; tests that
+    exercise the inhibitor enable it explicitly.
+    """
+    cfg = Config(data_dir=tmp_path / "exwin", inhibit_idle=False)
     cfg._ensure_dirs()
     return cfg
 

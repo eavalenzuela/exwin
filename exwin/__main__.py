@@ -24,6 +24,9 @@ def main() -> None:
 
     subs.add_parser("list", help="List installed games")
 
+    p = subs.add_parser("info", help="Show details for a game")
+    p.add_argument("app_id")
+
     p = subs.add_parser("launch", help="Launch a game headlessly")
     p.add_argument("app_id")
 
@@ -41,12 +44,22 @@ def main() -> None:
     p.add_argument("app_id")
     p.add_argument("--backup", metavar="PATH", help="Path to specific backup zip (default: newest)")
 
-    args, _ = parser.parse_known_args()
+    p = subs.add_parser("backups", help="List save backups for a game")
+    p.add_argument("app_id")
+
+    # Unknown args are tolerated only on the GUI path (GTK/GApplication may
+    # consume its own flags); for explicit subcommands a typo like
+    # `--delete-file` must be an error, not a silent no-op.
+    args, extra = parser.parse_known_args()
+    if extra and (args.command or args.launch):
+        parser.error(f"unrecognized arguments: {' '.join(extra)}")
 
     if args.launch:
         _headless_launch(args.launch)
     elif args.command == "list":
         _cmd_list()
+    elif args.command == "info":
+        _cmd_info(args.app_id)
     elif args.command == "launch":
         _headless_launch(args.app_id)
     elif args.command == "remove":
@@ -57,6 +70,8 @@ def main() -> None:
         _cmd_backup_saves(args.app_id)
     elif args.command == "restore-saves":
         _cmd_restore_saves(args.app_id, getattr(args, "backup", None))
+    elif args.command == "backups":
+        _cmd_backups(args.app_id)
     else:
         from exwin.app import ExwinApp
 
@@ -80,7 +95,8 @@ def _headless_launch(app_id: str) -> None:
 
     from exwin.backend.app_config import load_app_config
     from exwin.backend.crash_detect import read_log_tail
-    from exwin.backend.launcher import Launcher
+    from exwin.backend.hooks import HookAbort, apply_post_hooks, apply_pre_hooks
+    from exwin.backend.launcher import Launcher, rotate_log
     from exwin.db.apps import get_app, update_last_launched, update_playtime
     from exwin.db.runtimes import get_runtime
 
@@ -100,13 +116,36 @@ def _headless_launch(app_id: str) -> None:
     env = launcher.build_env(app, runtime, app_config)
 
     log_path = config.logs_dir / f"{app_id}.log"
+    rotate_log(log_path)
     log_file = open(log_path, "w")  # noqa: SIM115
 
+    def _hook_log(msg: str) -> None:
+        log_file.write(f"{msg}\n")
+        log_file.flush()
+
+    # Mirror the GUI launch path: pre-hooks may mutate env (e.g. ISO mount);
+    # a failing pre_launch_cmd aborts the launch.
+    try:
+        hook_state = apply_pre_hooks(app_config.hooks, env, _hook_log)
+    except HookAbort as abort:
+        log_file.close()
+        print(f"exwin: launch aborted — {abort.reason}", file=sys.stderr)
+        if abort.output:
+            print(abort.output, file=sys.stderr)
+        sys.exit(1)
+
     start_time = time.monotonic()
-    proc = subprocess.Popen(cmd, env=env, stdout=log_file, stderr=log_file)
-    rc = proc.wait()
-    log_file.close()
-    duration = time.monotonic() - start_time
+    rc = -1
+    try:
+        proc = subprocess.Popen(cmd, env=env, stdout=log_file, stderr=log_file)
+        rc = proc.wait()
+    finally:
+        duration = time.monotonic() - start_time
+        try:
+            apply_post_hooks(app_config.hooks, hook_state, rc, env, _hook_log)
+        except Exception as exc:  # noqa: BLE001 — post-hooks are best-effort
+            _hook_log(f"hook: apply_post_hooks raised: {exc}")
+        log_file.close()
     update_playtime(app_id, int(duration))
     update_last_launched(app_id, datetime.now(tz=UTC).isoformat())
 
@@ -126,7 +165,7 @@ def _headless_launch(app_id: str) -> None:
 
 
 def _cmd_list() -> None:
-    from exwin.ui.library_page import _fmt_playtime
+    from exwin.util import fmt_playtime
 
     (config,) = _init()
 
@@ -145,8 +184,94 @@ def _cmd_list() -> None:
     print(header)
     print("-" * len(header))
     for a in sorted(apps, key=lambda x: x.name.lower()):
-        pt = _fmt_playtime(a.playtime_seconds) if a.playtime_seconds > 0 else "—"
+        pt = fmt_playtime(a.playtime_seconds) if a.playtime_seconds > 0 else "—"
         print(f"{a.app_id:<{col_id}}  {a.name:<{col_name}}  {a.source:<{col_src}}  {pt}")
+
+
+def _cmd_info(app_id: str) -> None:
+    from exwin.backend.app_config import load_app_config
+    from exwin.db.apps import get_app
+    from exwin.db.runtimes import get_runtime
+    from exwin.util import fmt_playtime
+
+    (config,) = _init()
+
+    app = get_app(app_id)
+    if not app:
+        sys.exit(f"exwin: app '{app_id}' not found in library")
+
+    runtime = get_runtime(app.runtime_id) if app.runtime_id else None
+    app_config = load_app_config(app_id, config)
+
+    def _row(label: str, value: str) -> None:
+        print(f"{label:<14} {value}")
+
+    _row("Name", app.name)
+    _row("ID", app.app_id)
+    _row("Source", app.source)
+    _row("Install path", str(app.install_path) if app.install_path else "—")
+    _row("Prefix", str(app.prefix_path) if app.prefix_path else "—")
+    _row("Executable", app.exe_path or "—")
+    _row("Runtime", runtime.name if runtime else "— (first detected)")
+    _row("Playtime", fmt_playtime(app.playtime_seconds) if app.playtime_seconds else "—")
+    _row("Last played", app.last_launched or "never")
+    _row("Installed", app.install_date or "—")
+    if app.tags:
+        _row("Tags", ", ".join(app.tag_list))
+    if app.steam_appid:
+        _row("Steam AppID", str(app.steam_appid))
+    if app.protondb_tier:
+        _row("ProtonDB", app.protondb_tier)
+
+    print()
+    print("Config:")
+    _row("  Arch", app_config.arch)
+    _row("  DXVK", "yes" if app_config.dxvk else "no")
+    _row("  VKD3D", "yes" if app_config.vkd3d else "no")
+    if app_config.winetricks_verbs:
+        _row("  Winetricks", " ".join(app_config.winetricks_verbs))
+    if app_config.launch_args:
+        _row("  Launch args", " ".join(app_config.launch_args))
+    if app_config.env:
+        _row("  Env vars", ", ".join(sorted(app_config.env)))
+    if app_config.cpu_affinity:
+        _row("  CPU affinity", app_config.cpu_affinity)
+    if app_config.locale:
+        _row("  Locale", app_config.locale)
+    if app_config.save_path:
+        _row("  Save path", app_config.save_path)
+
+
+def _cmd_backups(app_id: str) -> None:
+    from datetime import datetime
+
+    from exwin.backend.saves import list_backups
+    from exwin.db.apps import get_app
+
+    (config,) = _init()
+
+    app = get_app(app_id)
+    if not app:
+        sys.exit(f"exwin: app '{app_id}' not found in library")
+
+    backups = list_backups(app_id, config)
+    if not backups:
+        print(f"No save backups for '{app_id}'.")
+        return
+
+    print(f"{len(backups)} backup(s) for '{app_id}' (newest first):")
+    for b in backups:
+        try:
+            size_kib = b.stat().st_size / 1024
+        except OSError:
+            size_kib = 0.0
+        # Filenames are UTC timestamps: 20260703T101500_123456Z.zip
+        stamp = b.stem
+        try:
+            when = datetime.strptime(stamp, "%Y%m%dT%H%M%S_%fZ").strftime("%Y-%m-%d %H:%M:%S UTC")
+        except ValueError:
+            when = stamp
+        print(f"  {b.name}  {when}  {size_kib:.1f} KiB")
 
 
 def _cmd_remove(app_id: str, delete_files: bool) -> None:

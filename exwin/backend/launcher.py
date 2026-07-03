@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -24,6 +25,20 @@ from exwin.models import AppEntry
 
 # Cached GPU list — scanned once on first launch that needs GPU selection.
 _GPUS: list | None = None
+
+
+def rotate_log(log_path: Path) -> None:
+    """Keep one previous generation of a launch log as ``<name>.1``.
+
+    Each launch truncates ``<id>.log``; without rotation the evidence of the
+    previous crash is destroyed the moment the user hits Play again.
+    """
+    if not log_path.exists():
+        return
+    try:
+        log_path.replace(log_path.with_name(log_path.name + ".1"))
+    except OSError:
+        pass  # best effort — never block a launch on log housekeeping
 
 
 def _build_gamescope_prefix(gs: GamescopeConfig) -> list[str]:
@@ -114,6 +129,7 @@ class Launcher:
         env = self.build_env(app, runtime, app_config)
 
         log_path = self._config.logs_dir / f"{app.app_id}.log"
+        rotate_log(log_path)
         log_file = open(log_path, "w")  # noqa: SIM115 — kept open until process exits
 
         def _hook_log(msg: str) -> None:
@@ -186,7 +202,13 @@ class Launcher:
                 # Mark as user-initiated so the watch thread suppresses crash detection.
                 self._user_stopped.add(app_id)
         if proc:
-            proc.terminate()
+            # start_new_session=True makes the child a process-group leader, and
+            # Proton/umu/gamescope wrap the actual game in several layers —
+            # terminating only the leader would leave the game itself running.
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                proc.terminate()
 
     def build_command(self, app: AppEntry, runtime: Runtime, app_config: AppConfig) -> list[str]:
         """Build the launch command list for an app."""
@@ -307,12 +329,25 @@ class Launcher:
         # wrapper (it would double-render the HUD).
         gs = app_config.gamescope
         gs_active = gs.enabled and shutil.which("gamescope") is not None
+        if app_config.cpu_affinity and shutil.which("taskset"):
+            cmd = ["taskset", "-c", app_config.cpu_affinity] + cmd
         if app_config.mangohud and shutil.which("mangohud") and not (gs_active and gs.mangoapp):
             cmd = ["mangohud"] + cmd
         if app_config.gamemode and shutil.which("gamemoderun"):
             cmd = ["gamemoderun"] + cmd
         if gs_active:
             cmd = _build_gamescope_prefix(gs) + cmd
+
+        # Outermost: hold an idle/sleep inhibitor for the whole session so
+        # long cutscenes and controller-only play don't suspend the machine.
+        if self._config.inhibit_idle and shutil.which("systemd-inhibit"):
+            cmd = [
+                "systemd-inhibit",
+                "--what=idle:sleep",
+                "--who=exwin",
+                f"--why=Playing {app.name}",
+                "--mode=block",
+            ] + cmd
 
         return cmd
 
@@ -359,6 +394,40 @@ class Launcher:
             env["DRI_PRIME"] = str(app_config.gpu_index)
             if app_config.gpu_index < len(_GPUS):
                 env.setdefault("DXVK_FILTER_DEVICE_NAME", _GPUS[app_config.gpu_index].name)
+
+        # Wine sync primitives.  Proton enables esync/fsync by default and
+        # reads the inverted PROTON_NO_* vars; plain Wine builds read
+        # WINEESYNC / WINEFSYNC directly.  None = leave the runtime default.
+        if app_config.esync is not None:
+            if runtime.is_proton:
+                env["PROTON_NO_ESYNC"] = "0" if app_config.esync else "1"
+            else:
+                env["WINEESYNC"] = "1" if app_config.esync else "0"
+        if app_config.fsync is not None:
+            if runtime.is_proton:
+                env["PROTON_NO_FSYNC"] = "0" if app_config.fsync else "1"
+            else:
+                env["WINEFSYNC"] = "1" if app_config.fsync else "0"
+
+        # NVAPI / DLSS passthrough (NVIDIA)
+        if app_config.nvapi:
+            env["DXVK_ENABLE_NVAPI"] = "1"
+            if runtime.is_proton:
+                env["PROTON_ENABLE_NVAPI"] = "1"
+
+        # Locale override for region-locked titles (e.g. ja_JP.UTF-8)
+        if app_config.locale:
+            env["LANG"] = app_config.locale
+            env["LC_ALL"] = app_config.locale
+
+        # Per-app DXVK shader cache — avoids one giant shared state cache
+        if app_config.dxvk_state_cache and prefix_root is not None:
+            cache_dir = prefix_root / "dxvk_state_cache"
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                env["DXVK_STATE_CACHE_PATH"] = str(cache_dir)
+            except OSError:
+                pass  # unwritable prefix root — skip rather than break launch
 
         # User-supplied extra env vars (applied last so they can override defaults)
         env.update(app_config.env)

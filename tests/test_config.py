@@ -178,6 +178,43 @@ class TestUseUmu:
         assert loaded.use_umu is False
 
 
+class TestInhibitIdle:
+    def test_default_is_true(self) -> None:
+        assert Config().inhibit_idle is True
+
+    def test_roundtrip_false(self, tmp_path: Path, monkeypatch) -> None:
+        data_dir = tmp_path / "exwin"
+        monkeypatch.setenv("EXWIN_DATA_DIR", str(data_dir))
+        cfg = Config(data_dir=data_dir, inhibit_idle=False)
+        cfg._ensure_dirs()
+        cfg.save()
+        loaded = Config.load()
+        assert loaded.inhibit_idle is False
+
+
+class TestCorruptConfig:
+    def test_corrupt_toml_falls_back_to_defaults(self, tmp_path: Path, monkeypatch) -> None:
+        data_dir = tmp_path / "exwin"
+        data_dir.mkdir()
+        (data_dir / "config.toml").write_text("not = [valid toml ...")
+        monkeypatch.setenv("EXWIN_DATA_DIR", str(data_dir))
+
+        cfg = Config.load()  # must not raise
+        assert cfg.data_dir == data_dir
+        assert cfg.use_umu is True  # defaults
+
+    def test_corrupt_toml_backed_up(self, tmp_path: Path, monkeypatch) -> None:
+        data_dir = tmp_path / "exwin"
+        data_dir.mkdir()
+        (data_dir / "config.toml").write_text("garbage = ")
+        monkeypatch.setenv("EXWIN_DATA_DIR", str(data_dir))
+
+        Config.load()
+        assert (data_dir / "config.toml.bad").read_text() == "garbage = "
+        # A fresh default config was written in its place
+        assert (data_dir / "config.toml").exists()
+
+
 def _load_from(data_dir: Path) -> Config:
     """Load a Config from an explicit data_dir without touching the real home dir."""
     import tomllib

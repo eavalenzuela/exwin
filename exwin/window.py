@@ -337,6 +337,10 @@ class ExwinWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _uninstall_app(self, app: AppEntry, delete_files: bool) -> None:
+        # Never uninstall out from under a running game — stop it first so the
+        # process doesn't linger untracked (and file deletion doesn't race it).
+        if self._launcher.is_running(app.app_id):
+            self._launcher.stop(app.app_id)
         uninstall_app(app, self._config, delete_files)
         self.refresh_library()
         self.show_toast(f'"{app.name}" uninstalled')

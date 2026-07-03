@@ -13,6 +13,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gtk, Pango  # noqa: E402
 
 from exwin.models import AppEntry  # noqa: E402
+from exwin.util import fmt_playtime as _fmt_playtime  # noqa: E402
 
 # Width of each card in the flow grid
 _CARD_WIDTH = 160
@@ -27,13 +28,6 @@ _SORT_OPTIONS = [
 
 # Source filter options
 _SOURCE_FILTERS = ["All", "GOG", "Manual"]
-
-
-def _fmt_playtime(seconds: int) -> str:
-    if seconds < 60:
-        return "< 1m"
-    h, m = divmod(seconds // 60, 60)
-    return f"{h}h {m}m" if h else f"{m}m"
 
 
 class LibraryPage(Gtk.Box):
@@ -232,7 +226,10 @@ class LibraryPage(Gtk.Box):
         card = child.get_child()
         if not isinstance(card, _AppCard):
             return True
-        return query in card.app.name.lower()
+        if query in card.app.name.lower():
+            return True
+        # Also match against tags so "rpg" finds every game tagged rpg.
+        return any(query in tag.lower() for tag in card.app.tag_list)
 
     def _on_search_changed(self, _entry: Gtk.SearchEntry) -> None:
         self._flow_box.invalidate_filter()

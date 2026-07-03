@@ -5,7 +5,7 @@ from __future__ import annotations
 from exwin.backend.config import Config
 from exwin.db.apps import get_app, insert_app, update_playtime
 from exwin.models import AppEntry, AppSource
-from exwin.ui.library_page import _fmt_playtime
+from exwin.util import fmt_playtime as _fmt_playtime
 
 
 def _app(app_id: str = "pt-game") -> AppEntry:

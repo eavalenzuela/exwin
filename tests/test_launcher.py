@@ -9,7 +9,7 @@ import pytest
 
 from exwin.backend.app_config import AppConfig, GamescopeConfig
 from exwin.backend.config import Config
-from exwin.backend.launcher import Launcher, _build_gamescope_prefix
+from exwin.backend.launcher import Launcher, _build_gamescope_prefix, rotate_log
 from exwin.backend.runtime import Runtime
 from exwin.models import AppEntry, AppSource, RuntimeType
 
@@ -147,6 +147,184 @@ class TestBuildEnv:
         cfg = AppConfig(env={"CUSTOM_VAR": "hello"})
         env = launcher.build_env(app, wine_rt, cfg)
         assert env["CUSTOM_VAR"] == "hello"
+
+
+# ---------------------------------------------------------------------------
+# ESYNC / FSYNC / NVAPI / locale / DXVK state cache env knobs
+# ---------------------------------------------------------------------------
+
+
+class TestSyncEnvKnobs:
+    def test_default_leaves_sync_env_unset(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime, default_cfg: AppConfig
+    ) -> None:
+        env = launcher.build_env(app, wine_rt, default_cfg)
+        for var in ("WINEESYNC", "WINEFSYNC", "PROTON_NO_ESYNC", "PROTON_NO_FSYNC"):
+            assert var not in env
+
+    def test_esync_wine(self, launcher: Launcher, app: AppEntry, wine_rt: Runtime) -> None:
+        env = launcher.build_env(app, wine_rt, AppConfig(esync=True))
+        assert env["WINEESYNC"] == "1"
+        env = launcher.build_env(app, wine_rt, AppConfig(esync=False))
+        assert env["WINEESYNC"] == "0"
+
+    def test_esync_proton_inverted(
+        self, launcher: Launcher, app: AppEntry, proton_rt: Runtime
+    ) -> None:
+        env = launcher.build_env(app, proton_rt, AppConfig(esync=True))
+        assert env["PROTON_NO_ESYNC"] == "0"
+        env = launcher.build_env(app, proton_rt, AppConfig(esync=False))
+        assert env["PROTON_NO_ESYNC"] == "1"
+
+    def test_fsync_wine(self, launcher: Launcher, app: AppEntry, wine_rt: Runtime) -> None:
+        env = launcher.build_env(app, wine_rt, AppConfig(fsync=True))
+        assert env["WINEFSYNC"] == "1"
+
+    def test_fsync_proton_inverted(
+        self, launcher: Launcher, app: AppEntry, proton_rt: Runtime
+    ) -> None:
+        env = launcher.build_env(app, proton_rt, AppConfig(fsync=False))
+        assert env["PROTON_NO_FSYNC"] == "1"
+
+    def test_nvapi_proton_sets_both(
+        self, launcher: Launcher, app: AppEntry, proton_rt: Runtime
+    ) -> None:
+        env = launcher.build_env(app, proton_rt, AppConfig(nvapi=True))
+        assert env["PROTON_ENABLE_NVAPI"] == "1"
+        assert env["DXVK_ENABLE_NVAPI"] == "1"
+
+    def test_nvapi_wine_sets_dxvk_only(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime
+    ) -> None:
+        env = launcher.build_env(app, wine_rt, AppConfig(nvapi=True))
+        assert env["DXVK_ENABLE_NVAPI"] == "1"
+        assert "PROTON_ENABLE_NVAPI" not in env
+
+    def test_locale_sets_lang_and_lc_all(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime
+    ) -> None:
+        env = launcher.build_env(app, wine_rt, AppConfig(locale="ja_JP.UTF-8"))
+        assert env["LANG"] == "ja_JP.UTF-8"
+        assert env["LC_ALL"] == "ja_JP.UTF-8"
+
+    def test_dxvk_state_cache_dir_created(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime
+    ) -> None:
+        env = launcher.build_env(app, wine_rt, AppConfig(dxvk_state_cache=True))
+        cache_dir = app.prefix_path / "dxvk_state_cache"
+        assert env["DXVK_STATE_CACHE_PATH"] == str(cache_dir)
+        assert cache_dir.is_dir()
+
+    def test_dxvk_state_cache_off_by_default(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime, default_cfg: AppConfig
+    ) -> None:
+        env = launcher.build_env(app, wine_rt, default_cfg)
+        assert "DXVK_STATE_CACHE_PATH" not in env
+
+
+# ---------------------------------------------------------------------------
+# CPU affinity (taskset)
+# ---------------------------------------------------------------------------
+
+
+class TestCpuAffinity:
+    def test_taskset_prepended(self, launcher: Launcher, app: AppEntry, wine_rt: Runtime) -> None:
+        cfg = AppConfig(cpu_affinity="0-3")
+        with patch(
+            "exwin.backend.launcher.shutil.which",
+            side_effect=lambda n: _which(n, {"taskset"}),
+        ):
+            cmd = launcher.build_command(app, wine_rt, cfg)
+        assert cmd[:3] == ["taskset", "-c", "0-3"]
+        assert cmd[3] == "/usr/bin/wine"
+
+    def test_missing_taskset_skipped(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime
+    ) -> None:
+        cfg = AppConfig(cpu_affinity="0-3")
+        with patch("exwin.backend.launcher.shutil.which", return_value=None):
+            cmd = launcher.build_command(app, wine_rt, cfg)
+        assert "taskset" not in cmd
+
+    def test_wrappers_wrap_taskset(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime
+    ) -> None:
+        """gamemoderun/mangohud stay outside taskset so the game inherits the mask."""
+        cfg = AppConfig(cpu_affinity="0,2", gamemode=True, mangohud=True)
+        with patch(
+            "exwin.backend.launcher.shutil.which",
+            side_effect=lambda n: _which(n, {"taskset", "gamemoderun", "mangohud"}),
+        ):
+            cmd = launcher.build_command(app, wine_rt, cfg)
+        assert cmd[0] == "gamemoderun"
+        assert cmd[1] == "mangohud"
+        assert cmd[2:5] == ["taskset", "-c", "0,2"]
+
+
+# ---------------------------------------------------------------------------
+# Idle/sleep inhibit (systemd-inhibit)
+# ---------------------------------------------------------------------------
+
+
+class TestIdleInhibit:
+    def test_wraps_outermost_when_enabled(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime
+    ) -> None:
+        launcher._config.inhibit_idle = True
+        cfg = AppConfig(gamemode=True)
+        with patch(
+            "exwin.backend.launcher.shutil.which",
+            side_effect=lambda n: _which(n, {"systemd-inhibit", "gamemoderun"}),
+        ):
+            cmd = launcher.build_command(app, wine_rt, cfg)
+        assert cmd[0] == "systemd-inhibit"
+        assert "--what=idle:sleep" in cmd
+        assert any(a.startswith("--why=Playing") for a in cmd)
+        assert cmd[cmd.index("--mode=block") + 1] == "gamemoderun"
+
+    def test_disabled_not_wrapped(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime, default_cfg: AppConfig
+    ) -> None:
+        launcher._config.inhibit_idle = False
+        with patch(
+            "exwin.backend.launcher.shutil.which",
+            side_effect=lambda n: _which(n, {"systemd-inhibit"}),
+        ):
+            cmd = launcher.build_command(app, wine_rt, default_cfg)
+        assert "systemd-inhibit" not in cmd
+
+    def test_missing_binary_skipped(
+        self, launcher: Launcher, app: AppEntry, wine_rt: Runtime, default_cfg: AppConfig
+    ) -> None:
+        launcher._config.inhibit_idle = True
+        with patch("exwin.backend.launcher.shutil.which", return_value=None):
+            cmd = launcher.build_command(app, wine_rt, default_cfg)
+        assert "systemd-inhibit" not in cmd
+
+
+# ---------------------------------------------------------------------------
+# Log rotation
+# ---------------------------------------------------------------------------
+
+
+class TestRotateLog:
+    def test_rotates_existing_log(self, tmp_path: Path) -> None:
+        log = tmp_path / "app.log"
+        log.write_text("previous session")
+        rotate_log(log)
+        assert not log.exists()
+        assert (tmp_path / "app.log.1").read_text() == "previous session"
+
+    def test_overwrites_older_generation(self, tmp_path: Path) -> None:
+        log = tmp_path / "app.log"
+        (tmp_path / "app.log.1").write_text("ancient")
+        log.write_text("previous")
+        rotate_log(log)
+        assert (tmp_path / "app.log.1").read_text() == "previous"
+
+    def test_missing_log_is_noop(self, tmp_path: Path) -> None:
+        rotate_log(tmp_path / "no-such.log")  # should not raise
+        assert not (tmp_path / "no-such.log.1").exists()
 
 
 # ---------------------------------------------------------------------------

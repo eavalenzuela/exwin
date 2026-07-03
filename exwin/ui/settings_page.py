@@ -166,6 +166,21 @@ class SettingsPage(Adw.PreferencesPage):
         self._umu_row.connect("notify::active", self._on_use_umu_changed)
         wine_group.add(self._umu_row)
 
+        # Sleep/idle inhibit while a game runs
+        inhibit_available = shutil_which("systemd-inhibit") is not None
+        if inhibit_available:
+            inhibit_subtitle = "Hold a systemd idle/sleep inhibitor while a game is running"
+        else:
+            inhibit_subtitle = "systemd-inhibit not found — inhibitor will be skipped"
+        self._inhibit_row = Adw.SwitchRow(
+            title="Prevent sleep during play",
+            subtitle=inhibit_subtitle,
+        )
+        self._inhibit_row.set_active(config.inhibit_idle and inhibit_available)
+        self._inhibit_row.set_sensitive(inhibit_available)
+        self._inhibit_row.connect("notify::active", self._on_inhibit_idle_changed)
+        wine_group.add(self._inhibit_row)
+
     # ------------------------------------------------------------------
     # Handlers
     # ------------------------------------------------------------------
@@ -206,6 +221,10 @@ class SettingsPage(Adw.PreferencesPage):
 
     def _on_use_umu_changed(self, row: Adw.SwitchRow, _param) -> None:
         self._config.use_umu = bool(row.get_active())
+        self._config.save()
+
+    def _on_inhibit_idle_changed(self, row: Adw.SwitchRow, _param) -> None:
+        self._config.inhibit_idle = bool(row.get_active())
         self._config.save()
 
     def _on_download_ge_clicked(self, _btn: Gtk.Button) -> None:

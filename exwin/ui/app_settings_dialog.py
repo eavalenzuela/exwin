@@ -161,6 +161,42 @@ class AppSettingsDialog(Adw.Dialog):
         self._vkd3d_row.set_active(cfg.vkd3d)
         group.add(self._vkd3d_row)
 
+        # ESYNC / FSYNC tri-state (Default = leave the runtime's default)
+        self._sync_options = ["Default (runtime)", "Force on", "Force off"]
+
+        def _sync_selected(value: bool | None) -> int:
+            return 0 if value is None else (1 if value else 2)
+
+        self._esync_row = Adw.ComboRow(
+            title="ESYNC",
+            subtitle="Eventfd-based synchronisation (WINEESYNC / PROTON_NO_ESYNC)",
+        )
+        self._esync_row.set_model(Gtk.StringList.new(self._sync_options))
+        self._esync_row.set_selected(_sync_selected(cfg.esync))
+        group.add(self._esync_row)
+
+        self._fsync_row = Adw.ComboRow(
+            title="FSYNC",
+            subtitle="Futex-based synchronisation (WINEFSYNC / PROTON_NO_FSYNC)",
+        )
+        self._fsync_row.set_model(Gtk.StringList.new(self._sync_options))
+        self._fsync_row.set_selected(_sync_selected(cfg.fsync))
+        group.add(self._fsync_row)
+
+        self._nvapi_row = Adw.SwitchRow(
+            title="NVAPI / DLSS",
+            subtitle="Expose NVAPI to the game (PROTON_ENABLE_NVAPI, NVIDIA only)",
+        )
+        self._nvapi_row.set_active(cfg.nvapi)
+        group.add(self._nvapi_row)
+
+        self._dxvk_cache_row = Adw.SwitchRow(
+            title="Per-app DXVK shader cache",
+            subtitle="Keep the DXVK state cache inside this app's prefix",
+        )
+        self._dxvk_cache_row.set_active(cfg.dxvk_state_cache)
+        group.add(self._dxvk_cache_row)
+
         self._winetricks_row = WinetricksRow(title="Winetricks verbs", parent=self)
         self._winetricks_row.set_text(" ".join(cfg.winetricks_verbs))
         self._winetricks_row.set_tooltip_text("Pick verbs to apply (e.g. vcrun2019, dxvk)")
@@ -191,6 +227,21 @@ class AppSettingsDialog(Adw.Dialog):
         self._args_row.set_text(" ".join(cfg.launch_args))
         self._args_row.set_tooltip_text("Space-separated arguments passed to the executable")
         group.add(self._args_row)
+
+        self._locale_row = Adw.EntryRow(title="Locale override")
+        self._locale_row.set_text(cfg.locale)
+        self._locale_row.set_tooltip_text(
+            "Sets LANG and LC_ALL for region-locked titles (e.g. ja_JP.UTF-8); empty = system"
+        )
+        group.add(self._locale_row)
+
+        self._affinity_row = Adw.EntryRow(title="CPU affinity")
+        self._affinity_row.set_text(cfg.cpu_affinity)
+        self._affinity_row.set_tooltip_text(
+            "taskset -c CPU list (e.g. 0-3 or 0,2,4) for titles that break on high core counts; "
+            "empty = all cores"
+        )
+        group.add(self._affinity_row)
 
         # umu-launcher override (tri-state)
         self._umu_options = ["Default (follow global)", "Force on", "Force off"]
@@ -919,10 +970,16 @@ class AppSettingsDialog(Adw.Dialog):
             "arch": self._arch_row.get_selected(),
             "dxvk": self._dxvk_row.get_active(),
             "vkd3d": self._vkd3d_row.get_active(),
+            "esync": self._esync_row.get_selected(),
+            "fsync": self._fsync_row.get_selected(),
+            "nvapi": self._nvapi_row.get_active(),
+            "dxvk_cache": self._dxvk_cache_row.get_active(),
             "winetricks": self._winetricks_row.get_text(),
             "gamemode": self._gamemode_row.get_active(),
             "mangohud": self._mangohud_row.get_active(),
             "args": self._args_row.get_text(),
+            "locale": self._locale_row.get_text(),
+            "affinity": self._affinity_row.get_text(),
             "save_path": self._save_path_row.get_text(),
             "cover": self._cover_row.get_text(),
             "env": env_buf.get_text(env_buf.get_start_iter(), env_buf.get_end_iter(), False),
@@ -994,6 +1051,22 @@ class AppSettingsDialog(Adw.Dialog):
                     errors.append(f"Invalid winetricks verb: '{verb}'")
                     break
 
+        # CPU affinity: taskset -c list syntax (digits, commas, ranges)
+        affinity = self._affinity_row.get_text().strip()
+        if affinity:
+            import re
+
+            if not re.match(r"^\d+(-\d+)?(,\d+(-\d+)?)*$", affinity):
+                errors.append(f"Invalid CPU affinity: '{affinity}' (expected e.g. 0-3 or 0,2,4)")
+
+        # Locale: conservative charset (e.g. ja_JP.UTF-8, C.UTF-8, en_US)
+        locale = self._locale_row.get_text().strip()
+        if locale:
+            import re
+
+            if not re.match(r"^[A-Za-z0-9_.@\-]+$", locale):
+                errors.append(f"Invalid locale: '{locale}'")
+
         return errors
 
     # ------------------------------------------------------------------
@@ -1018,15 +1091,25 @@ class AppSettingsDialog(Adw.Dialog):
         umu_sel = self._umu_row.get_selected()
         use_umu: bool | None = None if umu_sel == 0 else (umu_sel == 1)
 
+        def _tri_state(row: Adw.ComboRow) -> bool | None:
+            sel = row.get_selected()
+            return None if sel == 0 else (sel == 1)
+
         return AppConfig(
             arch=_ARCH_OPTIONS[self._arch_row.get_selected()],
             winetricks_verbs=verbs,
             dxvk=self._dxvk_row.get_active(),
             vkd3d=self._vkd3d_row.get_active(),
+            esync=_tri_state(self._esync_row),
+            fsync=_tri_state(self._fsync_row),
+            nvapi=self._nvapi_row.get_active(),
+            dxvk_state_cache=self._dxvk_cache_row.get_active(),
             env=env,
             launch_args=launch_args,
             gamemode=self._gamemode_row.get_active(),
             mangohud=self._mangohud_row.get_active(),
+            locale=self._locale_row.get_text().strip(),
+            cpu_affinity=self._affinity_row.get_text().strip(),
             dll_overrides=dll_overrides,
             gpu_index=gpu_index,
             use_umu=use_umu,
