@@ -13,6 +13,7 @@ from exwin.backend.generic_installer import (
     pick_best_exe,
     run_wine_installer,
     scan_candidate_exes,
+    wait_for_prefix_idle,
 )
 from exwin.backend.runtime import Runtime
 from exwin.models import RuntimeType
@@ -124,6 +125,23 @@ class TestRunWineInstallerMsi:
         cmd = mock_popen.call_args[0][0]
         assert "msiexec" not in cmd
 
+    def test_cwd_passed_to_popen(self, tmp_path: Path, wine_rt: Runtime) -> None:
+        exe = tmp_path / "patch.exe"
+        exe.touch()
+        prefix = tmp_path / "prefix"
+        game_dir = tmp_path / "game"
+        with patch("exwin.backend.generic_installer.subprocess.Popen") as mock_popen:
+            run_wine_installer(exe, prefix, wine_rt, cwd=game_dir)
+        assert mock_popen.call_args[1]["cwd"] == str(game_dir)
+
+    def test_cwd_defaults_to_none(self, tmp_path: Path, wine_rt: Runtime) -> None:
+        exe = tmp_path / "installer.exe"
+        exe.touch()
+        prefix = tmp_path / "prefix"
+        with patch("exwin.backend.generic_installer.subprocess.Popen") as mock_popen:
+            run_wine_installer(exe, prefix, wine_rt)
+        assert mock_popen.call_args[1]["cwd"] is None
+
 
 # ---------------------------------------------------------------------------
 # scan_candidate_exes
@@ -192,6 +210,57 @@ class TestScanCandidateExes:
         p_root = tmp_path / "empty_prefix"
         p_root.mkdir()
         assert scan_candidate_exes(p_root, wine_rt) == []
+
+
+# ---------------------------------------------------------------------------
+# wait_for_prefix_idle
+# ---------------------------------------------------------------------------
+
+
+class TestWaitForPrefixIdle:
+    def test_proton_waits_on_pfx_wineserver(self, tmp_path: Path, proton_rt: Runtime) -> None:
+        """Proton: invoke <path>/files/bin/wineserver -w with WINEPREFIX=<p_root>/pfx."""
+        wineserver = proton_rt.path / "files" / "bin" / "wineserver"
+        p_root = tmp_path / "compat"
+        with (
+            patch("exwin.backend.generic_installer.subprocess.run") as run,
+            patch.object(Path, "exists", return_value=True),
+        ):
+            wait_for_prefix_idle(p_root, proton_rt)
+        cmd, kwargs = run.call_args[0][0], run.call_args[1]
+        assert cmd == [str(wineserver), "-w"]
+        assert kwargs["env"]["WINEPREFIX"] == str(p_root / "pfx")
+
+    def test_wine_waits_on_root_wineserver(self, tmp_path: Path, wine_rt: Runtime) -> None:
+        """Plain Wine: wineserver lives at <path>/bin, WINEPREFIX is the root itself."""
+        p_root = tmp_path / "prefix"
+        with (
+            patch("exwin.backend.generic_installer.subprocess.run") as run,
+            patch.object(Path, "exists", return_value=True),
+        ):
+            wait_for_prefix_idle(p_root, wine_rt)
+        cmd, kwargs = run.call_args[0][0], run.call_args[1]
+        assert cmd == [str(wine_rt.path / "bin" / "wineserver"), "-w"]
+        assert kwargs["env"]["WINEPREFIX"] == str(p_root)
+
+    def test_noop_when_wineserver_missing(self, tmp_path: Path, proton_rt: Runtime) -> None:
+        """Best-effort: a missing wineserver binary must never block the install."""
+        with patch("exwin.backend.generic_installer.subprocess.run") as run:
+            wait_for_prefix_idle(tmp_path / "compat", proton_rt)  # binary does not exist
+        run.assert_not_called()
+
+    def test_swallows_timeout(self, tmp_path: Path, proton_rt: Runtime) -> None:
+        """A hung wait must be swallowed, not propagated to the caller."""
+        import subprocess as _sp
+
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch(
+                "exwin.backend.generic_installer.subprocess.run",
+                side_effect=_sp.TimeoutExpired(cmd="wineserver", timeout=1),
+            ),
+        ):
+            wait_for_prefix_idle(tmp_path / "compat", proton_rt, timeout=1)  # must not raise
 
 
 # ---------------------------------------------------------------------------

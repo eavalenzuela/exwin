@@ -254,6 +254,18 @@ def build_confirm_generic_page(
     base_game_row.set_visible(False)
     options_group.add(base_game_row)
 
+    install_dir_row = Adw.EntryRow(title="Run From Folder")
+    install_dir_row.set_tooltip_text(
+        "The installer is copied into this folder and run there, so patch and "
+        "add-on installers that look for the game next to their own .exe find it. "
+        "Defaults to the base game's install folder."
+    )
+    install_dir_browse = Gtk.Button(icon_name="folder-open-symbolic", valign=Gtk.Align.CENTER)
+    install_dir_browse.add_css_class("flat")
+    install_dir_row.add_suffix(install_dir_browse)
+    install_dir_row.set_visible(False)
+    options_group.add(install_dir_row)
+
     dxvk_row = Adw.SwitchRow(title="Install DXVK", subtitle="DirectX 9/10/11 → Vulkan")
     options_group.add(dxvk_row)
 
@@ -276,6 +288,8 @@ def build_confirm_generic_page(
         winetricks_row=winetricks_row,
         dlc_switch_row=dlc_switch_row,
         base_game_row=base_game_row,
+        install_dir_row=install_dir_row,
+        install_dir_browse=install_dir_browse,
         dxvk_row=dxvk_row,
         vkd3d_row=vkd3d_row,
     )

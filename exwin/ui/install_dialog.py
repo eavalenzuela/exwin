@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import threading
 import time
@@ -29,6 +30,7 @@ from exwin.backend.generic_installer import (  # noqa: E402
     pick_best_exe,
     run_wine_installer,
     scan_candidate_exes,
+    wait_for_prefix_idle,
 )
 from exwin.backend.gog_installer import (  # noqa: E402
     app_id_from_info,
@@ -162,8 +164,11 @@ class InstallDialog(Adw.Dialog):
         self._generic_winetricks_row = generic.winetricks_row
         self._generic_dlc_switch_row = generic.dlc_switch_row
         self._generic_base_game_row = generic.base_game_row
+        self._generic_install_dir_row = generic.install_dir_row
         self._generic_dxvk_row = generic.dxvk_row
         self._generic_vkd3d_row = generic.vkd3d_row
+        generic.install_dir_browse.connect("clicked", self._on_generic_install_dir_browse)
+        self._generic_base_game_row.connect("notify::selected", self._on_generic_base_game_changed)
 
         archive = build_confirm_archive_page(
             self._stack,
@@ -586,11 +591,17 @@ class InstallDialog(Adw.Dialog):
         )
         arch = _ARCH_OPTIONS[self._generic_arch_row.get_selected()]
 
+        run_dir: Path | None = None
         if self._generic_dlc_switch_row.get_active() and self._base_games:
             base_app = self._base_games[self._generic_base_game_row.get_selected()]
             self._generic_dlc_mode = True
             self._generic_dlc_base_app = base_app
             p_root = base_app.prefix_path
+            dir_text = self._generic_install_dir_row.get_text().strip()
+            if dir_text:
+                run_dir = Path(dir_text)
+            elif base_app.install_path:
+                run_dir = Path(base_app.install_path)
         else:
             from exwin.backend.prefix import prefix_root
 
@@ -609,16 +620,44 @@ class InstallDialog(Adw.Dialog):
         self._stack.set_visible_child_name("wine_running")
         threading.Thread(
             target=self._wine_installer_thread,
-            args=(self._installer_path, p_root, runtime, arch),
+            args=(self._installer_path, p_root, runtime, arch, run_dir),
             daemon=True,
         ).start()
 
-    def _wine_installer_thread(self, installer: Path, p_root: Path, runtime, arch: str) -> None:
+    def _wine_installer_thread(
+        self, installer: Path, p_root: Path, runtime, arch: str, run_dir: Path | None = None
+    ) -> None:
+        staged: Path | None = None
         try:
-            proc = run_wine_installer(installer, p_root, runtime, arch)
+            # For patch / add-on installers that resolve the game relative to
+            # their own .exe, stage a copy inside the target folder and run it
+            # there so it can find the game.
+            launch_exe = installer
+            if run_dir is not None:
+                try:
+                    run_dir.mkdir(parents=True, exist_ok=True)
+                    candidate = run_dir / installer.name
+                    if candidate.resolve() != installer.resolve():
+                        shutil.copy2(installer, candidate)
+                        staged = candidate
+                    launch_exe = candidate
+                except OSError as exc:
+                    GLib.idle_add(
+                        self._on_error,
+                        f"Could not copy the installer into {run_dir}:\n{exc}",
+                    )
+                    return
+
+            proc = run_wine_installer(launch_exe, p_root, runtime, arch, cwd=run_dir)
             self._wine_proc = proc
             start = time.monotonic()
             proc.wait()
+            # Bootstrapper installers (Setup Factory, many NSIS/InstallShield)
+            # detach the real installer and exit early, so proc.wait() returns
+            # before any files are written.  Wait for the prefix to go fully
+            # idle before scanning, or we'd scan an empty prefix and wrongly
+            # report failure.
+            wait_for_prefix_idle(p_root, runtime)
             elapsed = time.monotonic() - start
             self._wine_proc = None
             rc = proc.returncode
@@ -640,6 +679,15 @@ class InstallDialog(Adw.Dialog):
             )
         except Exception as exc:
             GLib.idle_add(self._on_error, str(exc))
+        finally:
+            # Remove the staged installer copy — the patch/add-on it delivered
+            # is applied to the game files, and the installer itself is not part
+            # of the game.
+            if staged is not None:
+                try:
+                    staged.unlink()
+                except OSError:
+                    pass
 
     def _on_wine_installer_done(self, rc: int = 0) -> None:
         if self._generic_dlc_mode and self._generic_dlc_base_app is not None:
@@ -798,7 +846,38 @@ class InstallDialog(Adw.Dialog):
         self._base_game_row.set_visible(switch_row.get_active())
 
     def _on_generic_dlc_toggled(self, switch_row: Adw.SwitchRow, _pspec) -> None:
-        self._generic_base_game_row.set_visible(switch_row.get_active())
+        active = switch_row.get_active()
+        self._generic_base_game_row.set_visible(active)
+        self._generic_install_dir_row.set_visible(active)
+        if active:
+            self._prefill_generic_install_dir()
+
+    def _on_generic_base_game_changed(self, _row: Adw.ComboRow, _pspec) -> None:
+        if self._generic_dlc_switch_row.get_active():
+            self._prefill_generic_install_dir()
+
+    def _prefill_generic_install_dir(self) -> None:
+        """Default the DLC target folder to the selected base game's install dir."""
+        if not self._base_games:
+            return
+        idx = self._generic_base_game_row.get_selected()
+        if idx == Gtk.INVALID_LIST_POSITION or idx >= len(self._base_games):
+            return
+        base_app = self._base_games[idx]
+        if base_app.install_path:
+            self._generic_install_dir_row.set_text(str(base_app.install_path))
+
+    def _on_generic_install_dir_browse(self, _btn: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog(title="Select Folder to Run Installer From")
+        dialog.select_folder(self.get_root(), None, self._on_generic_install_dir_selected)
+
+    def _on_generic_install_dir_selected(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            folder = dialog.select_folder_finish(result)
+            if folder:
+                self._generic_install_dir_row.set_text(folder.get_path())
+        except Exception:
+            pass
 
     def _on_install_done(self, app: AppEntry) -> None:
         self._install_spinner.set_spinning(False)

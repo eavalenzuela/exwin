@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -73,6 +74,7 @@ def run_wine_installer(
     p_root: Path,
     runtime: Runtime | None,
     arch: str = "win64",
+    cwd: Path | None = None,
 ) -> subprocess.Popen:
     """Create a Wine prefix and launch *installer_path* interactively.
 
@@ -84,6 +86,10 @@ def run_wine_installer(
         p_root:         The prefix root directory (STEAM_COMPAT_DATA_PATH or WINEPREFIX).
         runtime:        The Wine/Proton runtime to use, or None for system Wine.
         arch:           ``"win32"`` or ``"win64"`` for the Wine prefix.
+        cwd:            Working directory for the installer process.  Patch and
+                        add-on installers commonly resolve the game location
+                        relative to their own directory, so running from inside
+                        the game's install folder lets them find it.
 
     Returns:
         A running :class:`subprocess.Popen` object.
@@ -109,7 +115,51 @@ def run_wine_installer(
         env["WINEPREFIX"] = str(p_root)
         env["WINEARCH"] = arch
 
-    return subprocess.Popen(cmd, env=env)
+    return subprocess.Popen(cmd, env=env, cwd=str(cwd) if cwd else None)
+
+
+def wait_for_prefix_idle(
+    p_root: Path, runtime: Runtime | None, timeout: float | None = None
+) -> None:
+    """Block until every Wine process in the prefix has exited.
+
+    Installer bootstrappers — Setup Factory's ``suf_launch.exe``, and many NSIS
+    and InstallShield stubs — unpack the real installer, launch it as a
+    *separate* process, and exit immediately.  Waiting on the launched PID
+    therefore returns long before the game's files are written, so a scan run
+    right after would see an empty prefix and wrongly report a failed install.
+
+    ``wineserver -w`` blocks until the prefix's wineserver has no clients left,
+    i.e. the real installer (and any GUI the user is still clicking through) has
+    finished.  Best-effort: returns quietly if the wineserver binary can't be
+    located or the wait times out, so a missing tool never blocks an install.
+    """
+    if runtime and runtime.is_proton:
+        wineserver: Path | None = runtime.path / "files" / "bin" / "wineserver"
+        wineprefix = p_root / "pfx"
+    elif runtime:
+        wineserver = runtime.path / "bin" / "wineserver"
+        wineprefix = p_root
+    else:
+        found = shutil.which("wineserver")
+        wineserver = Path(found) if found else None
+        wineprefix = p_root
+
+    if wineserver is None or not wineserver.exists():
+        return
+
+    env = os.environ.copy()
+    env["WINEPREFIX"] = str(wineprefix)
+    try:
+        subprocess.run(
+            [str(wineserver), "-w"],
+            env=env,
+            timeout=timeout,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        pass
 
 
 def scan_candidate_exes(p_root: Path, runtime: Runtime | None) -> list[Path]:
