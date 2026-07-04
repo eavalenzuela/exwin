@@ -13,6 +13,7 @@ from exwin.backend.generic_installer import (
     pick_best_exe,
     run_wine_installer,
     scan_candidate_exes,
+    scan_prefix_extras,
     wait_for_prefix_idle,
 )
 from exwin.backend.runtime import Runtime
@@ -242,6 +243,50 @@ class TestScanCandidateExes:
 
         candidates = scan_candidate_exes(p_root, proton_rt)
         assert [c.name for c in candidates] == ["Game.exe"]
+
+
+# ---------------------------------------------------------------------------
+# scan_prefix_extras
+# ---------------------------------------------------------------------------
+
+
+class TestScanPrefixExtras:
+    def test_finds_game_extracted_beside_drive_c(self, tmp_path: Path, proton_rt: Runtime) -> None:
+        """A RAR SFX that unpacks into the prefix root (not drive_c) is still found."""
+        p_root = tmp_path / "manual-game.part1"
+        (p_root / "pfx" / "drive_c").mkdir(parents=True)  # empty prefix
+        game = p_root / "Game" / "WinRoot" / "engine"
+        game.mkdir(parents=True)
+        (game / "lcsebody.exe").touch()
+
+        assert scan_candidate_exes(p_root, proton_rt) == []  # drive_c is empty
+        extras = scan_prefix_extras(p_root, proton_rt)
+        assert [e.name for e in extras] == ["lcsebody.exe"]
+
+    def test_ignores_exes_inside_the_wine_prefix(self, tmp_path: Path, proton_rt: Runtime) -> None:
+        """Exes under pfx/ are the drive_c scan's job — don't double-count them."""
+        p_root = tmp_path / "prefix"
+        dc = p_root / "pfx" / "drive_c" / "windows"
+        dc.mkdir(parents=True)
+        (dc / "explorer.exe").touch()
+
+        assert scan_prefix_extras(p_root, proton_rt) == []
+
+    def test_filters_installer_and_msi_runtime_exes(
+        self, tmp_path: Path, proton_rt: Runtime
+    ) -> None:
+        """setup.exe / instmsi*.exe are noise, not the game."""
+        p_root = tmp_path / "prefix"
+        (p_root / "pfx" / "drive_c").mkdir(parents=True)
+        pkg = p_root / "Game"
+        pkg.mkdir(parents=True)
+        for name in ("setup.exe", "instmsia.exe", "instmsiw.exe"):
+            (pkg / name).touch()
+        (pkg / "WinRoot" / "engine").mkdir(parents=True)
+        (pkg / "WinRoot" / "engine" / "lcsebody.exe").touch()
+
+        extras = scan_prefix_extras(p_root, proton_rt)
+        assert [e.name for e in extras] == ["lcsebody.exe"]
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,8 @@ SKIP_EXE_NAMES = {
     "uninst.exe",
     "uninstall.exe",
     "setup.exe",
+    "instmsia.exe",  # MSI 2.0 runtime bootstrapper shipped inside older installers
+    "instmsiw.exe",
 }
 
 # Words in a stem that suggest a non-game executable.

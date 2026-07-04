@@ -203,6 +203,35 @@ def scan_candidate_exes(p_root: Path, runtime: Runtime | None) -> list[Path]:
     return sorted(candidates, key=lambda p: (len(p.parts), p.name.lower()))
 
 
+def scan_prefix_extras(p_root: Path, runtime: Runtime | None) -> list[Path]:
+    """Scan the prefix directory *outside* drive_c for game executables.
+
+    Fallback for installers that never install into drive_c: multi-part RAR
+    self-extractors and portable "extract to a folder" archives commonly unpack
+    the game into the prefix directory (or a subfolder the user picked) instead.
+    :func:`finalize_generic_install` stores ``exe_path`` relative to ``p_root``,
+    so anything found here is launchable.  Only used when
+    :func:`scan_candidate_exes` comes up empty.
+    """
+    if not p_root.is_dir():
+        return []
+    # Everything the drive_c scan already covers lives under this subtree.
+    prefix_internals = (p_root / "pfx") if (runtime and runtime.is_proton) else (p_root / "drive_c")
+
+    candidates = []
+    for exe in p_root.rglob("*.exe"):
+        if exe == prefix_internals or prefix_internals in exe.parents:
+            continue
+        rel = exe.relative_to(p_root)
+        if exe.name.lower() in _SKIP_EXES:
+            continue
+        if any(skip in str(rel).lower() for skip in _SKIP_DIRS):
+            continue
+        candidates.append(exe)
+
+    return sorted(candidates, key=lambda p: (len(p.parts), p.name.lower()))
+
+
 def finalize_generic_install(
     app_name: str,
     p_root: Path,

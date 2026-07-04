@@ -30,6 +30,7 @@ from exwin.backend.generic_installer import (  # noqa: E402
     pick_best_exe,
     run_wine_installer,
     scan_candidate_exes,
+    scan_prefix_extras,
     wait_for_prefix_idle,
 )
 from exwin.backend.gog_installer import (  # noqa: E402
@@ -699,6 +700,10 @@ class InstallDialog(Adw.Dialog):
 
         assert self._generic_prefix_root is not None
         candidates = scan_candidate_exes(self._generic_prefix_root, self._generic_runtime)
+        if not candidates:
+            # Some installers (multi-part RAR SFX, portable extractors) unpack
+            # the game into the prefix directory rather than drive_c.
+            candidates = scan_prefix_extras(self._generic_prefix_root, self._generic_runtime)
 
         if not candidates:
             if rc != 0:
