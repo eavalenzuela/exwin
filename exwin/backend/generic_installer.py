@@ -193,7 +193,10 @@ def scan_candidate_exes(p_root: Path, runtime: Runtime | None) -> list[Path]:
 
         if exe.name.lower() in _SKIP_EXES:
             continue
-        if any(skip in str(exe).lower() for skip in _SKIP_DIRS):
+        # Match SKIP_DIRS against the path *relative to drive_c* — matching the
+        # absolute path lets a prefix directory named after the installer (e.g.
+        # "…-setup") smuggle a skip token like "setup" into every candidate.
+        if any(skip in str(rel).lower() for skip in _SKIP_DIRS):
             continue
         candidates.append(exe)
 

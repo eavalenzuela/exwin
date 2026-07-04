@@ -211,6 +211,38 @@ class TestScanCandidateExes:
         p_root.mkdir()
         assert scan_candidate_exes(p_root, wine_rt) == []
 
+    def test_skip_token_in_prefix_path_does_not_exclude_game(
+        self, tmp_path: Path, proton_rt: Runtime
+    ) -> None:
+        """A prefix dir named after the installer (…-setup) must not filter every exe.
+
+        SKIP_DIRS tokens ("setup", "unins", …) are matched against the path
+        relative to drive_c, not the absolute path — otherwise a prefix like
+        `manual-nympho-…-setup` smuggles "setup" into every candidate.
+        """
+        # p_root's own path contains the skip token "setup".
+        p_root = tmp_path / "manual-game-setup"
+        drive_c = p_root / "pfx" / "drive_c"
+        prog = drive_c / "Program Files (x86)" / "MyGame"
+        prog.mkdir(parents=True)
+        (prog / "Game.exe").touch()
+
+        candidates = scan_candidate_exes(p_root, proton_rt)
+        assert [c.name for c in candidates] == ["Game.exe"]
+
+    def test_skip_token_still_filters_within_install(
+        self, tmp_path: Path, proton_rt: Runtime
+    ) -> None:
+        """SKIP_DIRS still filters a real setup/ subdir under the install."""
+        p_root, drive_c = self._make_prefix(tmp_path, proton_rt)
+        prog = drive_c / "Program Files (x86)" / "MyGame"
+        (prog / "setup").mkdir(parents=True)
+        (prog / "setup" / "vcredist.exe").touch()
+        (prog / "Game.exe").touch()
+
+        candidates = scan_candidate_exes(p_root, proton_rt)
+        assert [c.name for c in candidates] == ["Game.exe"]
+
 
 # ---------------------------------------------------------------------------
 # wait_for_prefix_idle
