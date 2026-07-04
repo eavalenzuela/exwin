@@ -37,7 +37,8 @@ add-extensions:
 finish-args:
   - --share=ipc
   - --socket=wayland
-  - --socket=fallback-x11
+  - --socket=x11                 # Proton defaults to winex11.drv; fallback-x11 leaves
+                                 # DISPLAY unset on Wayland sessions → nodrv_CreateWindow
   - --socket=pulseaudio          # audio for game playback
   - --share=network              # GOG metadata, Proton-GE downloads
   - --device=dri                 # GPU access
