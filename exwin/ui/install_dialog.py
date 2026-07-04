@@ -857,18 +857,35 @@ class InstallDialog(Adw.Dialog):
             self._prefill_generic_install_dir()
 
     def _prefill_generic_install_dir(self) -> None:
-        """Default the DLC target folder to the selected base game's install dir."""
+        """Default the DLC target folder to the folder holding the base game's exe."""
         if not self._base_games:
             return
         idx = self._generic_base_game_row.get_selected()
         if idx == Gtk.INVALID_LIST_POSITION or idx >= len(self._base_games):
             return
-        base_app = self._base_games[idx]
-        if base_app.install_path:
-            self._generic_install_dir_row.set_text(str(base_app.install_path))
+        target = self._base_game_exe_dir(self._base_games[idx])
+        if target:
+            self._generic_install_dir_row.set_text(str(target))
+
+    def _base_game_exe_dir(self, base_app: AppEntry) -> Path | None:
+        """Folder that holds the base game's exe — where patch installers should run.
+
+        ``exe_path`` is relative to ``install_path``, so a nested exe (e.g.
+        ``bin/game.exe``) resolves to its own subdirectory rather than the
+        install root.
+        """
+        if not base_app.install_path:
+            return None
+        install = Path(base_app.install_path)
+        if base_app.exe_path:
+            return install / Path(base_app.exe_path).parent
+        return install
 
     def _on_generic_install_dir_browse(self, _btn: Gtk.Button) -> None:
         dialog = Gtk.FileDialog(title="Select Folder to Run Installer From")
+        current = self._generic_install_dir_row.get_text().strip()
+        if current and Path(current).is_dir():
+            dialog.set_initial_folder(Gio.File.new_for_path(current))
         dialog.select_folder(self.get_root(), None, self._on_generic_install_dir_selected)
 
     def _on_generic_install_dir_selected(self, dialog: Gtk.FileDialog, result) -> None:
