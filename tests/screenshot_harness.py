@@ -245,6 +245,48 @@ _pump(200, sleep=0.3)
 
 
 # ---------------------------------------------------------------------------
+# Screenshot 4b: Install Dialog (auto-detection plan page)
+# ---------------------------------------------------------------------------
+print("\n=== 4b. Install Dialog (Auto-Detection Plan) ===")
+
+import tempfile  # noqa: E402
+
+from exwin.backend.auto_detect import InstallPlan, analyze_installer  # noqa: E402
+
+_koihime = Path("/games/games/MangaGamer/Koihime Musou/Koihime Musou.part1.exe")
+if _koihime.exists():
+    plan = analyze_installer(_koihime, runtimes)
+else:
+    _tmp = Path(tempfile.mkdtemp()) / "Example Game.part1.exe"
+    _tmp.touch()
+    plan = InstallPlan(
+        installer_path=_tmp,
+        route="archive",
+        tech="rar-sfx",
+        title="Example Game",
+        archive_kind="rar",
+        parts=[_tmp.with_name("Example Game.part2.rar")],
+        runtime_index=0 if runtimes else None,
+        runtime_name=runtimes[0].name if runtimes else "",
+        reasons=["Self-extracting archive — the payload can be unpacked directly."],
+    )
+
+auto_dialog = InstallDialog(
+    config=cfg,
+    runtimes=runtimes,
+    on_installed=lambda a: None,
+)
+auto_dialog.present(main_win)
+_pump(300, sleep=0.3)
+auto_dialog._installer_path = plan.installer_path
+auto_dialog._on_analyze_done(plan)
+_pump(500, sleep=0.5)
+_screenshot_widget(main_win, "04b_install_dialog_auto_plan")
+auto_dialog.force_close()
+_pump(200, sleep=0.3)
+
+
+# ---------------------------------------------------------------------------
 # Screenshot 5: Add Existing Game Dialog
 # ---------------------------------------------------------------------------
 print("\n=== 5. Add Existing Game Dialog ===")

@@ -388,6 +388,96 @@ def build_confirm_archive_page(
     )
 
 
+def build_auto_plan_page(
+    stack: Gtk.Stack,
+    on_auto_install,
+    on_manual,
+) -> SimpleNamespace:
+    """Build the auto-detection review page shown after analysing an installer.
+
+    Returns a namespace with: warn_banner, type_row, title_row, route_row,
+    runtime_row, arch_row, extras_row, reasons_list, auto_btn, manual_btn.
+    """
+    # Buttons live outside the scroll area so they're always reachable.
+    outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+    scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
+    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    outer.append(scroll)
+
+    box = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=16,
+        margin_top=16,
+        margin_bottom=16,
+        margin_start=16,
+        margin_end=16,
+    )
+    scroll.set_child(box)
+
+    warn_banner = Adw.Banner(title="", revealed=False)
+    box.append(warn_banner)
+
+    detected_group = Adw.PreferencesGroup(title="Detected")
+    title_row = Adw.ActionRow(title="Title")
+    type_row = Adw.ActionRow(title="Installer Type")
+    detected_group.add(title_row)
+    detected_group.add(type_row)
+    box.append(detected_group)
+
+    plan_group = Adw.PreferencesGroup(title="Install Plan")
+    route_row = Adw.ActionRow(title="Method")
+    runtime_row = Adw.ActionRow(title="Runtime")
+    arch_row = Adw.ActionRow(title="Architecture")
+    extras_row = Adw.ActionRow(title="Extras")
+    plan_group.add(route_row)
+    plan_group.add(runtime_row)
+    plan_group.add(arch_row)
+    plan_group.add(extras_row)
+    box.append(plan_group)
+
+    reasons_group = Adw.PreferencesGroup(title="Why These Choices")
+    reasons_list = Gtk.ListBox()
+    reasons_list.add_css_class("boxed-list")
+    reasons_list.set_selection_mode(Gtk.SelectionMode.NONE)
+    reasons_group.add(reasons_list)
+    box.append(reasons_group)
+
+    btn_box = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=8,
+        halign=Gtk.Align.CENTER,
+        margin_top=8,
+        margin_bottom=16,
+    )
+    manual_btn = Gtk.Button(label="Configure Manually…")
+    manual_btn.add_css_class("pill")
+    manual_btn.connect("clicked", on_manual)
+    btn_box.append(manual_btn)
+
+    auto_btn = Gtk.Button(label="Install Automatically")
+    auto_btn.add_css_class("suggested-action")
+    auto_btn.add_css_class("pill")
+    auto_btn.connect("clicked", on_auto_install)
+    btn_box.append(auto_btn)
+    outer.append(btn_box)
+
+    stack.add_named(outer, "auto_plan")
+
+    return SimpleNamespace(
+        warn_banner=warn_banner,
+        type_row=type_row,
+        title_row=title_row,
+        route_row=route_row,
+        runtime_row=runtime_row,
+        arch_row=arch_row,
+        extras_row=extras_row,
+        reasons_list=reasons_list,
+        auto_btn=auto_btn,
+        manual_btn=manual_btn,
+    )
+
+
 def build_installing_page(stack: Gtk.Stack) -> SimpleNamespace:
     """Build the progress/log page shown during extraction.
 

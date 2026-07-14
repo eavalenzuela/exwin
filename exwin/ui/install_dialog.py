@@ -19,13 +19,12 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 from exwin.backend import redist_scanner  # noqa: E402
 from exwin.backend.archive_installer import (  # noqa: E402
     archive_tool_available,
-    detect_archive_type,
     finalize_archive_install,
     install_archive,
 )
+from exwin.backend.auto_detect import InstallPlan, analyze_installer  # noqa: E402
 from exwin.backend.config import Config  # noqa: E402
 from exwin.backend.generic_installer import (  # noqa: E402
-    detect_installer_type,
     finalize_generic_install,
     pick_best_exe,
     run_wine_installer,
@@ -34,10 +33,10 @@ from exwin.backend.generic_installer import (  # noqa: E402
     wait_for_prefix_idle,
 )
 from exwin.backend.gog_installer import (  # noqa: E402
+    InstallerInfo,
     app_id_from_info,
     find_rar_tool,
     find_sibling_parts,
-    probe,
 )
 from exwin.backend.install_worker import install_gog, install_gog_dlc  # noqa: E402
 from exwin.backend.redist_scanner import RedistFinding, apply_finding  # noqa: E402
@@ -46,6 +45,7 @@ from exwin.db.apps import get_all_apps  # noqa: E402
 from exwin.models import AppEntry, AppSource  # noqa: E402
 from exwin.ui.install_pages import (  # noqa: E402
     _ARCH_OPTIONS,
+    build_auto_plan_page,
     build_confirm_archive_page,
     build_confirm_generic_page,
     build_confirm_gog_page,
@@ -78,6 +78,8 @@ class InstallDialog(Adw.Dialog):
         self._installer_path: Path | None = None
         self._installer_parts: list[Path] = []
         self._installer_type: str = "innosetup"  # "innosetup" | "generic" | "msi" | "archive"
+        self._auto_plan: InstallPlan | None = None
+        self._display_name: str | None = None  # cleaned title from auto-detection
         self._wine_proc: subprocess.Popen | None = None  # running Wine installer subprocess
         self._generic_prefix_root: Path | None = None
         self._generic_runtime: Runtime | None = None
@@ -128,6 +130,21 @@ class InstallDialog(Adw.Dialog):
 
     def _build_pages(self) -> None:
         build_welcome_page(self._stack, self._on_choose_clicked)
+
+        auto = build_auto_plan_page(
+            self._stack,
+            on_auto_install=self._on_auto_install_clicked,
+            on_manual=self._on_configure_manually_clicked,
+        )
+        self._auto_warn_banner = auto.warn_banner
+        self._auto_type_row = auto.type_row
+        self._auto_title_row = auto.title_row
+        self._auto_route_row = auto.route_row
+        self._auto_runtime_row = auto.runtime_row
+        self._auto_arch_row = auto.arch_row
+        self._auto_extras_row = auto.extras_row
+        self._auto_reasons_list = auto.reasons_list
+        self._auto_install_btn = auto.auto_btn
 
         gog = build_confirm_gog_page(
             self._stack,
@@ -274,27 +291,39 @@ class InstallDialog(Adw.Dialog):
     def _probe_thread(self) -> None:
         assert self._installer_path is not None
         try:
-            installer_type = detect_installer_type(self._installer_path)
-            if installer_type == "innosetup":
-                info = probe(self._installer_path)
-                GLib.idle_add(self._on_probe_done, info)
-            elif installer_type == "archive":
-                GLib.idle_add(self._on_archive_detected)
-            else:
-                GLib.idle_add(self._on_generic_detected)
+            plan = analyze_installer(self._installer_path, self._runtimes)
+            GLib.idle_add(self._on_analyze_done, plan)
         except Exception as exc:
             GLib.idle_add(self._on_error, str(exc))
 
-    def _on_probe_done(self, info) -> None:
-        self._installer_type = "innosetup"
-        self._gog_probe_info = info
+    def _on_analyze_done(self, plan: InstallPlan) -> None:
+        """Populate the route-specific confirm page, then show the auto-plan review."""
+        self._auto_plan = plan
+        self._display_name = plan.title
         self._install_spinner.set_spinning(False)
-        self._dialog_title.set_title(info.title)
+        self._dialog_title.set_title(plan.title)
+
+        if plan.route == "gog":
+            self._installer_type = "innosetup"
+            self._installer_parts = plan.parts
+            self._populate_gog_confirm(plan.probe_info or InstallerInfo(plan.title, "", ""))
+        elif plan.route == "archive":
+            self._installer_type = "archive"
+            self._populate_archive_confirm(plan)
+        else:
+            self._installer_type = "msi" if plan.tech == "msi" else "generic"
+            self._populate_generic_confirm()
+
+        self._apply_plan_to_widgets(plan)
+        self._populate_auto_page(plan)
+
+        self._set_step(2, "Review")
         self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
-        self._stack.set_visible_child_name("confirm")
+        self._stack.set_visible_child_name("auto_plan")
         self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
 
-        self._set_step(2, "Configure")
+    def _populate_gog_confirm(self, info) -> None:
+        self._gog_probe_info = info
         self._title_row.set_subtitle(info.title)
         self._gameid_row.set_subtitle(info.game_id or "N/A")
         self._lang_row.set_subtitle(", ".join(info.languages) or "N/A")
@@ -310,27 +339,16 @@ class InstallDialog(Adw.Dialog):
             self._rar_warn_banner.set_revealed(missing_rar)
             self._install_btn.set_sensitive(not missing_rar)
 
-    def _on_generic_detected(self) -> None:
-        self._installer_type = "generic"
+    def _populate_generic_confirm(self) -> None:
         assert self._installer_path is not None
-        self._install_spinner.set_spinning(False)
-        self._dialog_title.set_title(self._installer_path.stem)
-        self._set_step(2, "Configure")
         self._generic_file_row.set_subtitle(self._installer_path.name)
-        self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
-        self._stack.set_visible_child_name("confirm_generic")
-        self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
 
-    def _on_archive_detected(self) -> None:
-        self._installer_type = "archive"
+    def _populate_archive_confirm(self, plan: InstallPlan) -> None:
         assert self._installer_path is not None
-        self._install_spinner.set_spinning(False)
-        self._dialog_title.set_title(self._installer_path.stem)
-        self._set_step(2, "Configure")
         self._archive_file_row.set_subtitle(self._installer_path.name)
-        self._archive_name_row.set_text(self._installer_path.stem)
+        self._archive_name_row.set_text(plan.title)
 
-        kind = detect_archive_type(self._installer_path)
+        kind = plan.archive_kind
         if kind and not archive_tool_available(kind):
             if kind == "7z":
                 self._archive_tool_warn_banner.set_title(
@@ -346,9 +364,90 @@ class InstallDialog(Adw.Dialog):
             self._archive_tool_warn_banner.set_revealed(False)
             self._archive_install_btn.set_sensitive(True)
 
-        self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
-        self._stack.set_visible_child_name("confirm_archive")
-        self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
+    # ------------------------------------------------------------------
+    # Handlers — auto-detection plan page
+    # ------------------------------------------------------------------
+
+    def _apply_plan_to_widgets(self, plan: InstallPlan) -> None:
+        """Mirror the plan into the manual confirm pages so both routes agree."""
+        arch_idx = _ARCH_OPTIONS.index(plan.arch) if plan.arch in _ARCH_OPTIONS else 0
+        if self._runtimes and plan.runtime_index is not None:
+            for row in (self._runtime_row, self._generic_runtime_row, self._archive_runtime_row):
+                row.set_selected(plan.runtime_index)
+        for row in (self._arch_row, self._generic_arch_row, self._archive_arch_row):
+            row.set_selected(arch_idx)
+        for row in (self._dxvk_row, self._generic_dxvk_row, self._archive_dxvk_row):
+            row.set_active(plan.dxvk)
+        for row in (self._vkd3d_row, self._generic_vkd3d_row, self._archive_vkd3d_row):
+            row.set_active(plan.vkd3d)
+        if plan.winetricks_verbs:
+            verbs = " ".join(plan.winetricks_verbs)
+            for row in (
+                self._winetricks_row,
+                self._generic_winetricks_row,
+                self._archive_winetricks_row,
+            ):
+                row.set_text(verbs)
+
+    def _populate_auto_page(self, plan: InstallPlan) -> None:
+        self._auto_title_row.set_subtitle(plan.title)
+        self._auto_type_row.set_subtitle(plan.tech_label)
+        self._auto_route_row.set_subtitle(plan.route_label)
+        self._auto_runtime_row.set_subtitle(plan.runtime_name or "None detected")
+        self._auto_arch_row.set_subtitle(
+            "64-bit prefix" if plan.arch == "win64" else "32-bit prefix"
+        )
+
+        extras = []
+        if plan.dxvk:
+            extras.append("DXVK")
+        if plan.vkd3d:
+            extras.append("VKD3D-Proton")
+        if plan.winetricks_verbs:
+            extras.append("winetricks: " + " ".join(plan.winetricks_verbs))
+        self._auto_extras_row.set_subtitle(", ".join(extras) or "None")
+
+        while (child := self._auto_reasons_list.get_first_child()) is not None:
+            self._auto_reasons_list.remove(child)
+        for reason in plan.reasons:
+            row = Gtk.ListBoxRow(activatable=False)
+            label = Gtk.Label(
+                label=reason,
+                wrap=True,
+                xalign=0,
+                margin_top=8,
+                margin_bottom=8,
+                margin_start=12,
+                margin_end=12,
+            )
+            label.add_css_class("caption")
+            row.set_child(label)
+            self._auto_reasons_list.append(row)
+
+        if plan.warnings:
+            self._auto_warn_banner.set_title(" ".join(plan.warnings))
+            self._auto_warn_banner.set_revealed(True)
+        else:
+            self._auto_warn_banner.set_revealed(False)
+        self._auto_install_btn.set_sensitive(not plan.blocked)
+
+    def _on_auto_install_clicked(self, _btn: Gtk.Button) -> None:
+        plan = self._auto_plan
+        if plan is None:
+            return
+        if plan.route == "gog":
+            self._on_install_clicked(_btn)
+        elif plan.route == "archive":
+            self._on_archive_install_clicked(_btn)
+        else:
+            self._on_generic_install_clicked(_btn)
+
+    def _on_configure_manually_clicked(self, _btn: Gtk.Button) -> None:
+        plan = self._auto_plan
+        route = plan.route if plan is not None else "generic"
+        page = {"gog": "confirm", "archive": "confirm_archive"}.get(route, "confirm_generic")
+        self._set_step(2, "Configure")
+        self._stack.set_visible_child_name(page)
 
     # ------------------------------------------------------------------
     # Handlers — GOG install
@@ -608,7 +707,7 @@ class InstallDialog(Adw.Dialog):
 
             self._generic_dlc_mode = False
             self._generic_dlc_base_app = None
-            app_name = self._installer_path.stem
+            app_name = self._display_name or self._installer_path.stem
             app_id_slug = app_name.lower().replace(" ", "-")
             p_root = prefix_root(f"manual-{app_id_slug}", self._config)
 
@@ -726,13 +825,7 @@ class InstallDialog(Adw.Dialog):
 
         best = pick_best_exe(candidates)
         assert self._installer_path is not None
-        if self._gog_wine_mode and self._gog_probe_info is not None:
-            app_name = self._gog_probe_info.title
-            verbs_text = self._winetricks_row.get_text().strip()
-        else:
-            app_name = self._installer_path.stem
-            verbs_text = self._generic_winetricks_row.get_text().strip()
-        verbs = verbs_text.split() if verbs_text else []
+        app_name, verbs, dxvk, vkd3d = self._generic_finalize_options()
 
         self._stack.set_visible_child_name("installing")
         self._install_spinner.set_spinning(True)
@@ -741,9 +834,25 @@ class InstallDialog(Adw.Dialog):
 
         threading.Thread(
             target=self._finalize_thread,
-            args=(app_name, best, verbs),
+            args=(app_name, best, verbs, dxvk, vkd3d),
             daemon=True,
         ).start()
+
+    def _generic_finalize_options(self) -> tuple[str, list[str], bool, bool]:
+        """Gather name/verbs/DXVK/VKD3D from whichever confirm page drove the install."""
+        assert self._installer_path is not None
+        if self._gog_wine_mode and self._gog_probe_info is not None:
+            app_name = self._gog_probe_info.title
+            verbs_text = self._winetricks_row.get_text().strip()
+            dxvk = self._dxvk_row.get_active()
+            vkd3d = self._vkd3d_row.get_active()
+        else:
+            app_name = self._display_name or self._installer_path.stem
+            verbs_text = self._generic_winetricks_row.get_text().strip()
+            dxvk = self._generic_dxvk_row.get_active()
+            vkd3d = self._generic_vkd3d_row.get_active()
+        verbs = verbs_text.split() if verbs_text else []
+        return app_name, verbs, dxvk, vkd3d
 
     def _populate_exe_select(self, candidates: list[Path]) -> None:
         """Fill the exe selection list box with candidate executables."""
@@ -782,13 +891,7 @@ class InstallDialog(Adw.Dialog):
 
         assert self._generic_prefix_root is not None
 
-        if self._gog_wine_mode and self._gog_probe_info is not None:
-            app_name = self._gog_probe_info.title
-            verbs_text = self._winetricks_row.get_text().strip()
-        else:
-            app_name = self._installer_path.stem
-            verbs_text = self._generic_winetricks_row.get_text().strip()
-        verbs = verbs_text.split() if verbs_text else []
+        app_name, verbs, dxvk, vkd3d = self._generic_finalize_options()
 
         self._stack.set_visible_child_name("installing")
         self._install_spinner.set_spinning(True)
@@ -797,11 +900,13 @@ class InstallDialog(Adw.Dialog):
 
         threading.Thread(
             target=self._finalize_thread,
-            args=(app_name, exe_abs, verbs),
+            args=(app_name, exe_abs, verbs, dxvk, vkd3d),
             daemon=True,
         ).start()
 
-    def _finalize_thread(self, app_name: str, exe_abs: Path, verbs: list[str]) -> None:
+    def _finalize_thread(
+        self, app_name: str, exe_abs: Path, verbs: list[str], dxvk: bool, vkd3d: bool
+    ) -> None:
         assert self._generic_prefix_root is not None
 
         app_id_override = None
@@ -819,6 +924,8 @@ class InstallDialog(Adw.Dialog):
                 runtime=self._generic_runtime,
                 arch=self._generic_arch,
                 winetricks_verbs=verbs,
+                dxvk=dxvk,
+                vkd3d=vkd3d,
                 on_progress=lambda msg: GLib.idle_add(self._append_log, msg),
                 app_id_override=app_id_override,
                 source_override=source_override,
@@ -1006,6 +1113,8 @@ class InstallDialog(Adw.Dialog):
     def _on_retry_clicked(self, _btn: Gtk.Button) -> None:
         self._installer_path = None
         self._gog_wine_mode = False
+        self._auto_plan = None
+        self._display_name = None
         self._dialog_title.set_title("Install Game")
         self._stack.set_visible_child_name("welcome")
 

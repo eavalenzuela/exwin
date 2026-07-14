@@ -590,6 +590,15 @@ class AppSettingsDialog(Adw.Dialog):
         bar = Gtk.ActionBar()
         toolbar_view.add_bottom_bar(bar)
 
+        self._auto_btn = Gtk.Button(label="Auto-Configure")
+        self._auto_btn.add_css_class("flat")
+        self._auto_btn.set_tooltip_text(
+            "Inspect the game and this system, then apply the recommended "
+            "Wine/Proton and graphics settings"
+        )
+        self._auto_btn.connect("clicked", self._on_auto_configure)
+        bar.pack_start(self._auto_btn)
+
         if winetricks_available():
             self._apply_wt_btn = Gtk.Button(label="Apply Winetricks Now")
             self._apply_wt_btn.add_css_class("flat")
@@ -809,6 +818,111 @@ class AppSettingsDialog(Adw.Dialog):
         root = self.get_root()
         if hasattr(root, "show_toast"):
             root.show_toast(f"Cover art error: {message}")
+
+    # ------------------------------------------------------------------
+    # Auto-configure
+    # ------------------------------------------------------------------
+
+    def _on_auto_configure(self, _btn: Gtk.Button) -> None:
+        current = self._read_config()
+        runtime = self._runtime
+        if self._runtime_row is not None and self._runtimes:
+            runtime = self._runtimes[self._runtime_row.get_selected()]
+
+        self._auto_btn.set_sensitive(False)
+        self._auto_btn.set_label("Analysing…")
+        threading.Thread(
+            target=self._auto_scan_thread, args=(current, runtime), daemon=True
+        ).start()
+
+    def _auto_scan_thread(self, current, runtime) -> None:
+        from exwin.backend.auto_config import recommend_settings
+
+        try:
+            rec = recommend_settings(self._app, current, runtime)
+        except Exception as exc:
+            GLib.idle_add(self._on_auto_scan_failed, str(exc))
+            return
+        GLib.idle_add(self._on_auto_scan_ready, rec, runtime)
+
+    def _on_auto_scan_failed(self, message: str) -> None:
+        self._auto_btn.set_sensitive(True)
+        self._auto_btn.set_label("Auto-Configure")
+        self._show_settings_toast(f"Auto-configure failed: {message}")
+
+    def _on_auto_scan_ready(self, rec, runtime) -> None:
+        self._auto_btn.set_sensitive(True)
+        self._auto_btn.set_label("Auto-Configure")
+
+        if rec.is_empty:
+            self._show_settings_toast("Already using the recommended settings")
+            return
+
+        dialog = Adw.AlertDialog(
+            heading="Auto-Configure",
+            body="Recommended changes for this game:",
+        )
+        group = Adw.PreferencesGroup()
+        for change in rec.changes:
+            row = Adw.ActionRow(title=f"{change.label}: {change.value}", subtitle=change.reason)
+            group.add(row)
+        dialog.set_extra_child(group)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("apply", "Apply")
+        dialog.set_response_appearance("apply", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("apply")
+        dialog.connect("response", self._on_auto_configure_response, rec, runtime)
+        dialog.present(self)
+
+    def _on_auto_configure_response(self, _dialog: Adw.AlertDialog, response: str, rec, runtime):
+        if response != "apply":
+            return
+        self._apply_config_to_widgets(rec.config)
+        self._auto_btn.set_sensitive(False)
+        self._auto_btn.set_label("Applying…")
+        threading.Thread(target=self._auto_apply_thread, args=(rec, runtime), daemon=True).start()
+
+    def _auto_apply_thread(self, rec, runtime) -> None:
+        from exwin.backend.auto_config import apply_recommendation
+
+        try:
+            problems = apply_recommendation(self._app, rec, self._config, runtime)
+        except Exception as exc:
+            problems = [str(exc)]
+        GLib.idle_add(self._on_auto_apply_done, rec, problems)
+
+    def _on_auto_apply_done(self, rec, problems: list[str]) -> None:
+        self._auto_btn.set_sensitive(True)
+        self._auto_btn.set_label("Auto-Configure")
+        # The recommended config is already saved — refresh the dirty baseline
+        # so closing the dialog doesn't prompt about the auto-applied values.
+        self._initial_state = self._snapshot()
+        self._on_saved(rec.config)
+        if problems:
+            self._show_settings_toast(f"Auto-configure: {problems[0]}")
+        else:
+            n = len(rec.changes)
+            self._show_settings_toast(f"Auto-configure applied {n} change{'s' if n != 1 else ''}")
+
+    def _apply_config_to_widgets(self, cfg: AppConfig) -> None:
+        """Reflect *cfg* in the dialog rows touched by auto-configure."""
+        self._arch_row.set_selected(0 if cfg.arch == "win64" else 1)
+        self._dxvk_row.set_active(cfg.dxvk)
+        self._vkd3d_row.set_active(cfg.vkd3d)
+        self._nvapi_row.set_active(cfg.nvapi)
+        self._dxvk_cache_row.set_active(cfg.dxvk_state_cache)
+        self._gamemode_row.set_active(cfg.gamemode)
+        self._winetricks_row.set_text(" ".join(cfg.winetricks_verbs))
+        if self._gpu_row is not None:
+            if cfg.gpu_index is not None and cfg.gpu_index < len(self._gpus):
+                self._gpu_row.set_selected(cfg.gpu_index + 1)
+            else:
+                self._gpu_row.set_selected(0)
+
+    def _show_settings_toast(self, msg: str) -> None:
+        root = self.get_root()
+        if hasattr(root, "show_toast"):
+            root.show_toast(msg)
 
     def _on_apply_winetricks(self, _btn: Gtk.Button) -> None:
         verbs_text = self._winetricks_row.get_text().strip()

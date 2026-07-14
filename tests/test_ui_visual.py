@@ -354,6 +354,111 @@ class TestInstallDialogVisual:
 
 
 # ---------------------------------------------------------------------------
+# Tests: InstallDialog auto-detection plan page
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.ui
+class TestInstallDialogAutoPlan:
+    """The analyze → auto-plan review flow populates pages and mirrors widgets."""
+
+    def _dialog(self, visual_config):
+        from exwin.db.schema import init_db
+        from exwin.ui.install_dialog import InstallDialog
+
+        init_db(visual_config.data_dir)
+        return InstallDialog(
+            config=visual_config,
+            runtimes=[_make_runtime()],
+            on_installed=lambda a: None,
+        )
+
+    def _archive_plan(self, tmp_path: Path):
+        from exwin.backend.auto_detect import InstallPlan
+
+        installer = tmp_path / "Koihime Musou.part1.exe"
+        installer.touch()
+        return InstallPlan(
+            installer_path=installer,
+            route="archive",
+            tech="rar-sfx",
+            title="Koihime Musou",
+            archive_kind="rar",
+            parts=[tmp_path / "Koihime Musou.part2.rar"],
+            runtime_index=0,
+            runtime_name="Proton-GE 9-1",
+            dxvk=False,
+            vkd3d=False,
+            reasons=["Self-extracting archive — extract directly."],
+        )
+
+    def test_analyze_shows_auto_plan_page(self, visual_config, tmp_path: Path) -> None:
+        dialog = self._dialog(visual_config)
+        plan = self._archive_plan(tmp_path)
+        dialog._installer_path = plan.installer_path
+        dialog._on_analyze_done(plan)
+        assert dialog._stack.get_visible_child_name() == "auto_plan"
+        assert dialog._auto_title_row.get_subtitle() == "Koihime Musou"
+        assert "2 parts" in dialog._auto_type_row.get_subtitle()
+        assert dialog._auto_install_btn.get_sensitive()
+
+    def test_plan_mirrors_into_manual_page(self, visual_config, tmp_path: Path) -> None:
+        dialog = self._dialog(visual_config)
+        plan = self._archive_plan(tmp_path)
+        dialog._installer_path = plan.installer_path
+        dialog._on_analyze_done(plan)
+        assert dialog._archive_name_row.get_text() == "Koihime Musou"
+        assert dialog._archive_runtime_row.get_selected() == 0
+        assert dialog._archive_arch_row.get_selected() == 0  # win64
+        assert dialog._archive_dxvk_row.get_active() is False
+
+    def test_configure_manually_routes_by_plan(self, visual_config, tmp_path: Path) -> None:
+        dialog = self._dialog(visual_config)
+        plan = self._archive_plan(tmp_path)
+        dialog._installer_path = plan.installer_path
+        dialog._on_analyze_done(plan)
+        dialog._on_configure_manually_clicked(None)
+        assert dialog._stack.get_visible_child_name() == "confirm_archive"
+
+    def test_blocked_plan_disables_auto_install(self, visual_config, tmp_path: Path) -> None:
+        dialog = self._dialog(visual_config)
+        plan = self._archive_plan(tmp_path)
+        plan.blocked = True
+        plan.warnings = ["No RAR tool available."]
+        dialog._installer_path = plan.installer_path
+        dialog._on_analyze_done(plan)
+        assert not dialog._auto_install_btn.get_sensitive()
+        assert dialog._auto_warn_banner.get_revealed()
+
+    def test_gog_plan_populates_confirm_page(self, visual_config, tmp_path: Path) -> None:
+        from exwin.backend.auto_detect import InstallPlan
+        from exwin.backend.gog_installer import InstallerInfo
+
+        dialog = self._dialog(visual_config)
+        installer = tmp_path / "setup_balrum_1.03.exe"
+        installer.touch()
+        info = InstallerInfo(title="Balrum", game_id="1436885438", setup_version="5.5.7")
+        plan = InstallPlan(
+            installer_path=installer,
+            route="gog",
+            tech="innosetup-gog",
+            title="Balrum",
+            game_id="1436885438",
+            probe_info=info,
+            runtime_index=0,
+            runtime_name="Proton-GE 9-1",
+            reasons=["GOG offline installer."],
+        )
+        dialog._installer_path = installer
+        dialog._on_analyze_done(plan)
+        assert dialog._stack.get_visible_child_name() == "auto_plan"
+        assert dialog._title_row.get_subtitle() == "Balrum"
+        assert dialog._gameid_row.get_subtitle() == "1436885438"
+        dialog._on_configure_manually_clicked(None)
+        assert dialog._stack.get_visible_child_name() == "confirm"
+
+
+# ---------------------------------------------------------------------------
 # Tests: AddExistingDialog
 # ---------------------------------------------------------------------------
 
@@ -416,6 +521,30 @@ class TestAppSettingsDialogVisual:
         )
         cw = dialog.get_content_width()
         assert cw >= 400, f"AppSettingsDialog content_width too small: {cw}"
+
+    def test_auto_configure_applies_to_widgets(self, visual_config) -> None:
+        from exwin.backend.app_config import AppConfig
+        from exwin.ui.app_settings_dialog import AppSettingsDialog
+
+        dialog = AppSettingsDialog(
+            app=_make_app_entry(),
+            app_config=AppConfig(),
+            config=visual_config,
+            runtime=_make_runtime(),
+            on_saved=lambda c: None,
+            runtimes=[_make_runtime()],
+        )
+        recommended = AppConfig(
+            gamemode=True,
+            nvapi=True,
+            dxvk_state_cache=True,
+            winetricks_verbs=["vcrun2019"],
+        )
+        dialog._apply_config_to_widgets(recommended)
+        assert dialog._gamemode_row.get_active() is True
+        assert dialog._nvapi_row.get_active() is True
+        assert dialog._dxvk_cache_row.get_active() is True
+        assert dialog._winetricks_row.get_text() == "vcrun2019"
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from exwin.backend.app_config import AppConfig, save_app_config
 from exwin.backend.config import Config
+from exwin.backend.dxvk import install_dxvk, install_vkd3d
 from exwin.backend.exe_filter import (
     SKIP_DIRS as _SKIP_DIRS,
 )
@@ -240,6 +241,8 @@ def finalize_generic_install(
     runtime: Runtime | None,
     arch: str = "win64",
     winetricks_verbs: list[str] | None = None,
+    dxvk: bool = False,
+    vkd3d: bool = False,
     on_progress: Callable[[str], None] | None = None,
     app_id_override: str | None = None,
     source_override: AppSource = AppSource.MANUAL,
@@ -254,6 +257,8 @@ def finalize_generic_install(
         runtime:   The runtime used.
         arch:      Wine architecture.
         winetricks_verbs: Optional list of verbs to run post-install.
+        dxvk:      Install DXVK into the prefix after winetricks.
+        vkd3d:     Install vkd3d-proton into the prefix after winetricks.
         app_id_override: If set, use this app ID instead of auto-generating one.
         source_override: Library source tag (default ``AppSource.MANUAL``).
 
@@ -282,8 +287,22 @@ def finalize_generic_install(
                 f"{'.' if rc == 0 else ' — check logs for errors.'}"
             )
 
+    if dxvk:
+        _log("Installing DXVK…")
+        try:
+            install_dxvk(p_root, runtime, on_progress=_log)
+        except Exception as exc:
+            _log(f"DXVK install failed: {exc}")
+
+    if vkd3d:
+        _log("Installing vkd3d-proton…")
+        try:
+            install_vkd3d(p_root, runtime, on_progress=_log)
+        except Exception as exc:
+            _log(f"vkd3d-proton install failed: {exc}")
+
     # Save per-app config
-    app_config = AppConfig(arch=arch, winetricks_verbs=verbs)
+    app_config = AppConfig(arch=arch, winetricks_verbs=verbs, dxvk=dxvk, vkd3d=vkd3d)
     save_app_config(app_id, config, app_config)
 
     # exe_path stored relative to prefix root so the launcher can resolve it

@@ -55,6 +55,38 @@ def detect_archive_type(path: Path) -> str | None:
     return None
 
 
+# Self-extracting archives put the payload after a PE stub — scan this much of
+# the head for the embedded magic (WinRAR SFX stubs are a few hundred KiB).
+_SFX_SCAN_BYTES = 8 * 1024 * 1024
+
+
+def detect_sfx_archive(path: Path) -> str | None:
+    """Return ``"rar"``/``"7z"`` for a self-extracting .exe archive, else None.
+
+    Deliberately *not* folded into :func:`detect_archive_type`: an SFX .exe is
+    only treated as an archive where the caller explicitly chose to (the
+    auto-detect install route) — elsewhere .exe files keep their existing
+    run-via-Wine behaviour.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(_SFX_SCAN_BYTES)
+    except OSError:
+        return None
+    if not head.startswith(b"MZ"):
+        return None
+    if _RAR_MAGIC in head:
+        return "rar"
+    if _7Z_MAGIC in head:
+        return "7z"
+    return None
+
+
+def _effective_kind(path: Path) -> str | None:
+    """Archive kind by header magic, falling back to embedded SFX payload magic."""
+    return detect_archive_type(path) or detect_sfx_archive(path)
+
+
 def _find_7z() -> str | None:
     for name in ("7z", "7zz", "7za"):
         path = shutil.which(name)
@@ -89,7 +121,7 @@ def archive_tool_available(kind: str) -> bool:
 
 def count_archive_members(path: Path) -> int:
     """Return the number of files in the archive, or 0 if unknown."""
-    kind = detect_archive_type(path)
+    kind = _effective_kind(path)
     if kind == "zip":
         try:
             with zipfile.ZipFile(path) as zf:
@@ -144,7 +176,7 @@ def extract_archive(
             on_progress(msg)
 
     dest.mkdir(parents=True, exist_ok=True)
-    kind = detect_archive_type(src)
+    kind = _effective_kind(src)
 
     if kind == "zip":
         _extract_zip(src, dest, _log, on_file_progress)

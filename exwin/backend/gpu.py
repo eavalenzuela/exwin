@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,24 @@ class GPU:
     index: int  # DRI_PRIME index
     name: str  # e.g. "AMD Radeon RX 7700S"
     vendor: str  # "amd" | "nvidia" | "intel" | "unknown"
+
+
+_VULKAN_ICD_DIRS = (
+    Path("/usr/share/vulkan/icd.d"),
+    Path("/usr/local/share/vulkan/icd.d"),
+    Path("/etc/vulkan/icd.d"),
+)
+
+
+def vulkan_available() -> bool:
+    """True if a Vulkan ICD (driver manifest) or the vulkaninfo tool is present."""
+    for icd_dir in _VULKAN_ICD_DIRS:
+        try:
+            if any(icd_dir.glob("*.json")):
+                return True
+        except OSError:
+            continue
+    return shutil.which("vulkaninfo") is not None
 
 
 def detect_gpus() -> list[GPU]:
