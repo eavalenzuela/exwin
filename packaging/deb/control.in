@@ -20,7 +20,7 @@ Suggests: p7zip-full,
  fuseiso,
  udisks2,
  power-profiles-daemon
-Homepage: https://github.com/anthropics/exwin
+Homepage: https://github.com/eavalenzuela/exwin
 Description: Offline Windows software/game manager for Linux
  exwin is a GTK4/libadwaita application that manages Windows games and
  applications on Linux using Proton or Wine. It provides first-class

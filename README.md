@@ -53,6 +53,19 @@ Offline-first Windows software/game manager for Linux — "offline Steam" with a
 
 ## Installation / Running
 
+### Debian / Ubuntu package
+
+```bash
+packaging/deb/build-deb.sh                    # builds exwin_<version>_all.deb in the repo root
+sudo apt install ./exwin_<version>_all.deb    # NOT dpkg -i — apt resolves the dependencies
+```
+
+`dpkg -i` does not install dependencies (`python3-tomli-w`, GTK/libadwaita
+introspection data), so it leaves the package unconfigured; if you did that,
+recover with `sudo apt-get install -f`.
+
+### From source (development)
+
 ```bash
 python -m venv --system-site-packages .venv   # system-site-packages needed for PyGObject
 .venv/bin/pip install -e .

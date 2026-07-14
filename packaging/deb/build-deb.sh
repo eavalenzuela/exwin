@@ -18,6 +18,15 @@ if [ -z "${VERSION}" ]; then
     exit 1
 fi
 
+# The CLI reports exwin.__version__ — refuse to build a package whose
+# metadata version disagrees with what `exwin --version` will print.
+INIT_VERSION="$(grep -E '^__version__' "${REPO_ROOT}/exwin/__init__.py" \
+    | sed -E 's/^__version__\s*=\s*"([^"]+)".*/\1/')"
+if [ "${VERSION}" != "${INIT_VERSION}" ]; then
+    echo "Version mismatch: pyproject.toml=${VERSION} exwin/__init__.py=${INIT_VERSION}" >&2
+    exit 1
+fi
+
 STAGE="$(mktemp -d /tmp/exwin-deb.XXXXXX)"
 trap 'rm -rf "${STAGE}"' EXIT
 ROOT="${STAGE}/exwin_${VERSION}_all"

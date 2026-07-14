@@ -2,14 +2,15 @@
 
 import argparse
 import sys
-from importlib.metadata import version as _pkg_version
+
+from exwin import __version__
 
 
 def _get_version() -> str:
-    try:
-        return _pkg_version("exwin")
-    except Exception:
-        return "dev"
+    # Sourced from exwin/__init__.py rather than importlib.metadata: the
+    # Debian package installs the bare source tree without dist-info, and a
+    # stale pip install elsewhere on the system must not win either.
+    return __version__
 
 
 def main() -> None:
