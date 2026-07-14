@@ -1,6 +1,6 @@
 # exwin
 
-**v0.5.0**
+**v0.5.1**
 
 Offline-first Windows software/game manager for Linux — "offline Steam" with a Proton/Wine backend and first-class GOG offline installer automation.
 
@@ -74,7 +74,13 @@ python -m venv --system-site-packages .venv   # system-site-packages needed for 
 
 ## Changelog
 
+### v0.5.1 (2026-07-14)
+- **Version visible in the UI** — new About dialog (hamburger menu → "About exwin") and an About group with the version number on the Settings page
+
 ### v0.5.0 (2026-07-13)
+- `exwin --version` reports the packaged version (was "exwin dev" under the Debian package, which ships no dist-info metadata); the deb build now refuses to run on a pyproject/`__init__.py` version mismatch
+- Debian package metadata pointed at the wrong GitHub organisation
+- README documents deb installation via `sudo apt install ./exwin_<ver>_all.deb` (`dpkg -i` leaves the package unconfigured on missing dependencies)
 - **Auto-detection install route** — `backend/auto_detect.py` analyses the chosen installer (archive magic bytes, PE header, InnoSetup/NSIS/InstallShield/Setup Factory stub markers, embedded SFX payloads, multi-part volume sets, innoextract probe) and builds an explainable `InstallPlan`: extraction method, runtime (newest Proton-GE preferred), prefix architecture, and DXVK/VKD3D defaults. The install dialog now lands on a one-click "Install Automatically" review page with a "Configure Manually…" escape hatch that pre-fills the existing per-route pages
 - **Self-extracting archive support** — RAR/7z SFX `.exe` installers (including multi-part `name.part1.exe` + `name.partN.rar` sets) are detected via `detect_sfx_archive()` and extracted directly with unar/unrar/7z instead of running the Windows stub interactively
 - **Auto-configure game settings** — `backend/auto_config.py` + an "Auto-Configure" button in per-app settings: inspects the installed game (engine markers, DirectX/VC-runtime DLL references in the exe, bundled redists) and the host (GPUs, Vulkan ICDs, gamemode), previews every recommended change with a reason, then applies them — NVAPI/DLSS on NVIDIA, discrete-GPU override on hybrid laptops, DXVK/VKD3D where needed under plain Wine, per-app shader cache, gamemode, missing `vcrun` verbs
