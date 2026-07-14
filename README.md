@@ -1,14 +1,16 @@
 # exwin
 
-**v0.4.0**
+**v0.5.0**
 
 Offline-first Windows software/game manager for Linux — "offline Steam" with a Proton/Wine backend and first-class GOG offline installer automation.
 
 ## Features
 
+- **Auto-detection install route** — every installer is analysed up front (magic bytes, PE header, InnoSetup/NSIS/InstallShield markers, self-extracting RAR/7z payloads, multi-part volume sets) and a one-click install plan is proposed: best extraction method, runtime (newest Proton-GE preferred), prefix architecture, and translation layers, each with a stated reason; a "Configure Manually" escape hatch keeps the full per-route options
+- **Auto-configure game settings** — one click in per-game settings inspects the installed game (engine markers, DirectX/VC-runtime DLLs referenced by the exe, bundled redists) and the host (GPUs, Vulkan driver, gamemode) then applies the recommended settings: NVAPI/DLSS on NVIDIA, discrete-GPU override on hybrid laptops, DXVK/VKD3D where needed, per-app shader cache, gamemode, and missing winetricks runtime verbs — with an explainable preview before anything is written
 - **GOG installer automation** — probe, extract, and install GOG offline installers (single-part and multi-part RAR/InnoSetup layouts) with automatic executable detection
 - **DLC installs** — install GOG DLC on top of an existing base-game prefix
-- **Archive installers** — install games shipped as plain `.zip`, `.7z`, or `.rar` archives (itch.io, indies, abandonware); auto-detect main exe after extraction
+- **Archive installers** — install games shipped as plain `.zip`, `.7z`, or `.rar` archives (itch.io, indies, abandonware), including self-extracting `.exe` archives and multi-part volume sets; auto-detect main exe after extraction
 - **MSI installers** — run `.msi` installers via `wine msiexec /i`
 - **Generic installer support** — run any Windows installer interactively via Wine, then select the resulting executable
 - **Library management** — searchable grid view with cover art (search matches names and tags); per-game settings persisted to `~/.exwin/`
@@ -59,7 +61,16 @@ python -m venv --system-site-packages .venv   # system-site-packages needed for 
 
 ## Changelog
 
-### Unreleased
+### v0.5.0 (2026-07-13)
+- **Auto-detection install route** — `backend/auto_detect.py` analyses the chosen installer (archive magic bytes, PE header, InnoSetup/NSIS/InstallShield/Setup Factory stub markers, embedded SFX payloads, multi-part volume sets, innoextract probe) and builds an explainable `InstallPlan`: extraction method, runtime (newest Proton-GE preferred), prefix architecture, and DXVK/VKD3D defaults. The install dialog now lands on a one-click "Install Automatically" review page with a "Configure Manually…" escape hatch that pre-fills the existing per-route pages
+- **Self-extracting archive support** — RAR/7z SFX `.exe` installers (including multi-part `name.part1.exe` + `name.partN.rar` sets) are detected via `detect_sfx_archive()` and extracted directly with unar/unrar/7z instead of running the Windows stub interactively
+- **Auto-configure game settings** — `backend/auto_config.py` + an "Auto-Configure" button in per-app settings: inspects the installed game (engine markers, DirectX/VC-runtime DLL references in the exe, bundled redists) and the host (GPUs, Vulkan ICDs, gamemode), previews every recommended change with a reason, then applies them — NVAPI/DLSS on NVIDIA, discrete-GPU override on hybrid laptops, DXVK/VKD3D where needed under plain Wine, per-app shader cache, gamemode, missing `vcrun` verbs
+- Generic install path now honours the DXVK / VKD3D switches (previously ignored)
+- Generic installer waits for the prefix's wineserver to go idle before scanning — bootstrapper installers (Setup Factory, NSIS/InstallShield stubs) no longer report false "install failed"
+- Games unpacked outside `drive_c` (multi-part RAR SFX, portable extractors) are found by a prefix-extras scan
+- DLC "Run From Folder" — patch/add-on installers are copied into (and run from) the base game's exe folder so they can find the game
+- Fixed exe scan excluding every candidate when the prefix path contains a skip token (e.g. "…-setup")
+- Flatpak: `--socket=x11` granted so Proton games render on Wayland hosts
 - **Sleep/idle inhibit during play** — launches are wrapped in `systemd-inhibit --what=idle:sleep` (global "Prevent sleep during play" toggle; skipped when systemd-inhibit is absent)
 - **Wine sync / NVAPI / locale env knobs** — per-app ESYNC and FSYNC tri-states (`WINEESYNC`/`WINEFSYNC` on Wine, inverted `PROTON_NO_ESYNC`/`PROTON_NO_FSYNC` on Proton), NVAPI/DLSS passthrough (`PROTON_ENABLE_NVAPI` + `DXVK_ENABLE_NVAPI`), locale override (`LANG`/`LC_ALL`), and a per-app DXVK state cache under the prefix (`DXVK_STATE_CACHE_PATH`)
 - **CPU affinity** — per-app `taskset -c <list>` wrapper with validated cpu-list entry in the settings dialog

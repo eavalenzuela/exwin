@@ -39,6 +39,19 @@
   <launchable type="desktop-id">io.github.exwin.desktop</launchable>
 
   <releases>
+    <release version="0.5.0" date="2026-07-13">
+      <description>
+        <p>Auto-detection install route, auto-configure game settings, and installer robustness fixes.</p>
+        <ul>
+          <li>Auto-detection install route: every installer is analysed (magic bytes, PE header, installer-stub markers, SFX payloads, multi-part sets) and a one-click install plan is proposed with reasons; manual configuration remains available</li>
+          <li>Self-extracting RAR/7z .exe archives (including multi-part sets) extract directly instead of running the Windows stub</li>
+          <li>Auto-configure: inspect the installed game and host system, preview recommended Wine/Proton and graphics settings with reasons, and apply them in one click</li>
+          <li>Sleep/idle inhibit during play, ESYNC/FSYNC/NVAPI/locale knobs, CPU affinity, CLI info and backups subcommands, .lnk shortcut resolution</li>
+          <li>Generic installer waits for wineserver idle (no more false failures from bootstrapper installers); DLC installers run from the base game's folder</li>
+          <li>Stop signals the whole process group; headless launches honour hooks; corrupt config no longer blocks startup</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-04-18">
       <description>
         <p>Eleven new features across two batches: installer types, per-game overlays, online lookups, launch hardening, and portable import.</p>
