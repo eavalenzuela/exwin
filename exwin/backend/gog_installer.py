@@ -11,6 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from exwin.util import tool_usable
+
 # Pre-compiled patterns used in _parse_info_output (called per-line)
 _RE_INSPECTING = re.compile(r'Inspecting "(.+?)"')
 _RE_DATA_VERSION = re.compile(r"setup data version ([\d.]+)")
@@ -67,10 +69,15 @@ def probe(installer_path: Path) -> InstallerInfo:
 
 
 def find_rar_tool() -> str | None:
-    """Return the path to unrar or unar if available, else None."""
+    """Return the path to unrar or unar if available and runnable, else None.
+
+    A tool can be on PATH yet unable to start (host binary seen through a
+    Flatpak sandbox) — skip those so callers warn up front instead of failing
+    mid-extraction.
+    """
     for tool in ("unrar", "unar"):
         path = shutil.which(tool)
-        if path:
+        if path and tool_usable(path):
             return path
     return None
 

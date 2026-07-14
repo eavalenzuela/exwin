@@ -27,6 +27,7 @@ from exwin.backend.winetricks import is_available as winetricks_available
 from exwin.backend.winetricks import run_verbs
 from exwin.db.apps import insert_app
 from exwin.models import AppEntry, AppSource
+from exwin.util import tool_usable
 
 # Archive header magic bytes.
 _ZIP_MAGICS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
@@ -90,7 +91,7 @@ def _effective_kind(path: Path) -> str | None:
 def _find_7z() -> str | None:
     for name in ("7z", "7zz", "7za"):
         path = shutil.which(name)
-        if path:
+        if path and tool_usable(path):
             return path
     return None
 
@@ -98,7 +99,7 @@ def _find_7z() -> str | None:
 def _find_rar_tool() -> str | None:
     for name in ("unar", "unrar"):
         path = shutil.which(name)
-        if path:
+        if path and tool_usable(path):
             return path
     return None
 
