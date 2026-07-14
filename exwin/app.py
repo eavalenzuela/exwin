@@ -56,10 +56,31 @@ class ExwinApp(Adw.Application):
         search_action.connect("activate", self._on_search_accel)
         self.add_action(search_action)
 
+        about_action = Gio.SimpleAction.new("about", None)
+        about_action.connect("activate", self._on_about)
+        self.add_action(about_action)
+
     def _on_search_accel(self, _action: Gio.SimpleAction, _param) -> None:  # noqa: ANN001
         win = self.props.active_window
         if win and hasattr(win, "toggle_search"):
             win.toggle_search()
+
+    def _on_about(self, _action: Gio.SimpleAction, _param) -> None:  # noqa: ANN001
+        from gi.repository import Gtk
+
+        from exwin import __version__
+
+        dialog = Adw.AboutDialog(
+            application_name="exwin",
+            application_icon=APP_ID,
+            version=__version__,
+            developer_name="exwin maintainers",
+            website="https://github.com/eavalenzuela/exwin",
+            issue_url="https://github.com/eavalenzuela/exwin/issues",
+            license_type=Gtk.License.MIT_X11,
+            comments="Offline Windows software/game manager for Linux via Proton/Wine.",
+        )
+        dialog.present(self.props.active_window)
 
     def do_activate(self) -> None:
         win = self.props.active_window

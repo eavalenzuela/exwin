@@ -9,7 +9,7 @@ gi.require_version("Gtk", "4.0")
 
 from datetime import UTC  # noqa: E402
 
-from gi.repository import Adw, GObject, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GObject, Gtk  # noqa: E402
 
 from exwin.backend.app_config import load_app_config  # noqa: E402
 from exwin.backend.config import Config  # noqa: E402
@@ -66,6 +66,15 @@ class ExwinWindow(Adw.ApplicationWindow):
             tooltip_text="Toggle sidebar",
         )
         header.pack_start(self._sidebar_toggle)
+
+        menu = Gio.Menu()
+        menu.append("About exwin", "app.about")
+        menu_btn = Gtk.MenuButton(
+            icon_name="open-menu-symbolic",
+            tooltip_text="Main menu",
+            menu_model=menu,
+        )
+        header.pack_end(menu_btn)
 
         self._search_toggle = Gtk.ToggleButton(
             icon_name="system-search-symbolic",

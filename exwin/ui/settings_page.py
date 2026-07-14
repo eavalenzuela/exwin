@@ -181,6 +181,20 @@ class SettingsPage(Adw.PreferencesPage):
         self._inhibit_row.connect("notify::active", self._on_inhibit_idle_changed)
         wine_group.add(self._inhibit_row)
 
+        # ── About group ──────────────────────────────────────────────────
+        from exwin import __version__
+
+        about_group = Adw.PreferencesGroup(title="About")
+        self.add(about_group)
+
+        self._version_row = Adw.ActionRow(title="exwin", subtitle=f"Version {__version__}")
+        self._version_row.add_prefix(Gtk.Image(icon_name="help-about-symbolic", pixel_size=16))
+        about_btn = Gtk.Button(label="Details…", valign=Gtk.Align.CENTER)
+        about_btn.add_css_class("flat")
+        about_btn.set_action_name("app.about")
+        self._version_row.add_suffix(about_btn)
+        about_group.add(self._version_row)
+
     # ------------------------------------------------------------------
     # Handlers
     # ------------------------------------------------------------------

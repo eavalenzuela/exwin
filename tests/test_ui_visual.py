@@ -612,6 +612,13 @@ class TestSettingsPageVisual:
         assert nat_w > 0, "SettingsPage has zero natural width"
         assert nat_h > 0, "SettingsPage has zero natural height"
 
+    def test_page_shows_version(self, visual_config) -> None:
+        from exwin import __version__
+        from exwin.ui.settings_page import SettingsPage
+
+        page = SettingsPage(config=visual_config, runtimes=[])
+        assert __version__ in page._version_row.get_subtitle()
+
 
 # ---------------------------------------------------------------------------
 # Tests: LibraryPage
