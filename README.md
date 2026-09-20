@@ -74,6 +74,10 @@ python -m venv --system-site-packages .venv   # system-site-packages needed for 
 
 ## Changelog
 
+### v0.5.2 (2026-09-20)
+- **Fixed the tray icon freezing GNOME** — the DBusMenu `GetLayout` reply wrapped each menu item in an extra variant layer (`v(v(...))` on the wire), which the GNOME AppIndicator extension could not parse; it re-requested the layout in a tight loop and pinned `gnome-shell` at 100% CPU until the session was hard-rebooted. Children are now emitted as plain `(ia{sv}av)` structs, with a regression test that checks the boxed wire format
+- Extraction tools (unar/unrar/7z) that are visible on `PATH` but cannot actually run — e.g. host binaries seen through `/run/host` inside the Flatpak sandbox — are skipped during discovery, so a broken candidate falls through to the next one instead of failing mid-install with exit code 127
+
 ### v0.5.1 (2026-07-14)
 - **Version visible in the UI** — new About dialog (hamburger menu → "About exwin") and an About group with the version number on the Settings page
 
