@@ -132,3 +132,27 @@ class TestStartStop:
             result = tray.start()
         assert result is False
         assert tray.running is False
+
+
+class TestLayoutWireFormat:
+    def test_children_are_singly_boxed_variants(self) -> None:
+        """Regression: children must be v((ia{sv}av)), not v(v(...)).
+
+        A doubly-boxed child makes the GNOME AppIndicator extension throw
+        "TypeError: (destructured parameter) is not iterable" on every
+        GetLayout and re-request it forever (~600 calls/sec).
+        """
+        from gi.repository import GLib
+
+        tray = TrayIcon("i", "exwin", lambda: None, lambda: None)
+        full = GLib.Variant("(u(ia{sv}av))", (1, tray._build_layout_tuple()))
+        children = full.get_child_value(1).get_child_value(2)
+        assert children.n_children() == 2
+        for i in range(children.n_children()):
+            boxed = children.get_child_value(i)
+            assert boxed.get_type_string() == "v"
+            inner = boxed.get_variant()
+            assert inner.get_type_string() == "(ia{sv}av)"
+            item_id, props, _ = inner.unpack()
+            assert item_id in (1, 2)
+            assert "label" in props

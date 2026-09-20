@@ -358,8 +358,12 @@ class TrayIcon:
 
         The caller embeds this directly in GLib.Variant("(u(ia{sv}av))", ...)
         so PyGObject can apply the full type string in one pass.  Each child
-        item is pre-built as GLib.Variant("v", ...) since the 'av' type
-        requires each element to already be a boxed variant.
+        item is a GLib.Variant of type (ia{sv}av); PyGObject boxes it into
+        the 'av' element itself.  Do NOT pre-wrap children in GLib.Variant("v",
+        ...): that produces a doubly-boxed v(v(...)) child on the wire, which
+        the GNOME AppIndicator extension cannot destructure.  It then marks
+        the menu not-ready and re-requests the layout in a tight loop,
+        pinning gnome-shell at 100% CPU and freezing the desktop.
         """
 
         def _item(item_id: int, label: str) -> GLib.Variant:
@@ -369,7 +373,7 @@ class TrayIcon:
                 "visible": GLib.Variant("b", True),
                 "type": GLib.Variant("s", "standard"),
             }
-            return GLib.Variant("v", GLib.Variant("(ia{sv}av)", (item_id, props, [])))
+            return GLib.Variant("(ia{sv}av)", (item_id, props, []))
 
         return (0, {}, [_item(1, f"Show {self._title}"), _item(2, "Quit")])
 
